@@ -11,6 +11,7 @@ import { randomUUID } from "crypto";
 import { QdrantService } from "./services/qdrant.service.js";
 import { EmbeddingService } from "./services/embedding.service.js";
 import { CacheService } from "./services/cache.service.js";
+import { Neo4jService } from "./services/neo4j.service.js";
 import { ResearchTool } from "./tools/research.tool.js";
 import { PatternTool } from "./tools/pattern.tool.js";
 import { ArchitectureTool } from "./tools/architecture.tool.js";
@@ -22,11 +23,13 @@ import { TestingTool } from "./tools/testing.tool.js";
 import { FeedbackTool } from "./tools/feedback.tool.js";
 import { MetadataTool } from "./tools/metadata.tool.js";
 import { BugFixTool } from "./tools/bugfix.tool.js";
+import { GraphTool } from "./tools/graph.tool.js";
 
 export class GameDevMCPServer {
     private server: Server;
     private qdrant: QdrantService;
     private embedding: EmbeddingService;
+    private neo4j: Neo4jService;
     private cache: CacheService;
     private tools: Map<string, any>;
     private httpServer?: HttpServer;
@@ -52,6 +55,11 @@ export class GameDevMCPServer {
         );
         this.embedding = new EmbeddingService(
             process.env.EMBEDDING_URL || "http://localhost:8080"
+        );
+        this.neo4j = new Neo4jService(
+            process.env.NEO4J_URL || "bolt://localhost:7687",
+            process.env.NEO4J_USER || "neo4j",
+            process.env.NEO4J_PASSWORD || "password"
         );
         this.cache = new CacheService();
         this.sseSessions = new Map();
@@ -102,6 +110,12 @@ export class GameDevMCPServer {
         );
         const metadataTool = new MetadataTool(this.cache);
         const bugFixTool = new BugFixTool(this.qdrant, this.embedding);
+        const graphTool = new GraphTool(
+            this.neo4j,
+            this.qdrant,
+            this.embedding,
+            process.env.GRAPH_COLLECTION || "code_graph"
+        );
 
         // Register research tools
         this.tools.set("cache_research", researchTool.cacheResearch.bind(researchTool));
@@ -149,6 +163,8 @@ export class GameDevMCPServer {
         this.tools.set("record_bug_fix", bugFixTool.recordBugFix.bind(bugFixTool));
         this.tools.set("match_bug_fix", bugFixTool.matchBugFix.bind(bugFixTool));
         this.tools.set("get_bug_fix", bugFixTool.getBugFix.bind(bugFixTool));
+        this.tools.set("explore_graph_entity", graphTool.exploreGraph.bind(graphTool));
+        this.tools.set("search_graph_semantic", graphTool.searchGraph.bind(graphTool));
 
         // Register metadata/discovery tools
         this.tools.set("get_server_metadata", metadataTool.getServerMetadata.bind(metadataTool));
@@ -215,6 +231,32 @@ export class GameDevMCPServer {
                             issue: { type: "string", description: "Identifier used when the fix was recorded." }
                         },
                         required: ["issue"]
+                    }
+                },
+                {
+                    name: "explore_graph_entity",
+                    description: "Inspect a knowledge-graph entity plus its inbound/outbound Neo4j relationships.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            entityId: { type: "string", description: "Graph entity identifier (e.g., 'file:src/server.ts')." },
+                            maxNeighbors: { type: "number", description: "Maximum relationships to return (1-100).", default: 25 }
+                        },
+                        required: ["entityId"]
+                    }
+                },
+                {
+                    name: "search_graph_semantic",
+                    description: "Semantic search over the knowledge-graph embeddings (stored in Qdrant) to find relevant entities.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string", description: "Natural-language request or code snippet describing what you want to find." },
+                            limit: { type: "number", description: "Maximum results to return (1-20).", default: 10 },
+                            type: { type: "string", description: "Optional entity type filter (e.g., 'file', 'class', 'function')." },
+                            minScore: { type: "number", description: "Optional similarity threshold (0-1).", default: 0.55 }
+                        },
+                        required: ["query"]
                     }
                 },
                 {

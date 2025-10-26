@@ -62,6 +62,13 @@
       "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["engine-dev", "test-engineer", "optimizer"]
+    },
+    {
+      "name": "code_graph",
+      "description": "Embeddings produced by the graph builder for code, documentation, and architectural entities.",
+      "dimension": 768,
+      "distance": "Cosine",
+      "primaryAgents": ["engine-dev", "architect", "research-engine", "test-engineer"]
     }
   ]
 }

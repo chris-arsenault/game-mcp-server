@@ -1,0 +1,45 @@
+{
+  "patterns": [
+    {
+      "name": "ecs-component",
+      "description": "Entity Component System - Component pattern",
+      "indicators": {
+        "extends": ["Component"],
+        "methods": ["onAttach", "onDetach", "reset"],
+        "fileName": "*Component.js"
+      }
+    },
+    {
+      "name": "ecs-system",
+      "description": "Entity Component System - System pattern",
+      "indicators": {
+        "extends": ["System"],
+        "methods": ["update", "init", "cleanup"],
+        "fileName": "*System.js"
+      }
+    },
+    {
+      "name": "factory",
+      "description": "Factory pattern for object creation",
+      "indicators": {
+        "methods": ["create", "build"],
+        "returns": "object"
+      }
+    },
+    {
+      "name": "singleton",
+      "description": "Singleton pattern",
+      "indicators": {
+        "methods": ["getInstance"],
+        "properties": ["instance"]
+      }
+    },
+    {
+      "name": "event-emitter",
+      "description": "Event emitter/subscriber pattern",
+      "indicators": {
+        "methods": ["on", "emit", "off"]
+      }
+    }
+  ]
+}

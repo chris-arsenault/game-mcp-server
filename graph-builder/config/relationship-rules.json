@@ -1,0 +1,46 @@
+{
+  "rules": [
+    {
+      "type": "IMPORTS",
+      "pattern": "import .* from ['\"](.+)['\"]",
+      "source": "file",
+      "target": "module"
+    },
+    {
+      "type": "EXTENDS",
+      "pattern": "class \\w+ extends (\\w+)",
+      "source": "class",
+      "target": "class"
+    },
+    {
+      "type": "IMPLEMENTS",
+      "pattern": "// @implements ([\\w-]+)",
+      "source": "code",
+      "target": "pattern"
+    },
+    {
+      "type": "SUBSCRIBES_TO",
+      "pattern": "\\.on\\(['\"]([\\w:]+)['\"]",
+      "source": "code",
+      "target": "event"
+    },
+    {
+      "type": "EMITS",
+      "pattern": "\\.emit\\(['\"]([\\w:]+)['\"]",
+      "source": "code",
+      "target": "event"
+    },
+    {
+      "type": "CALLS",
+      "astNode": "CallExpression",
+      "source": "function",
+      "target": "function"
+    },
+    {
+      "type": "DOCUMENTS",
+      "pattern": "(?:^|\\n)#{1,3}\\s+([\\w\\s]+)",
+      "source": "document",
+      "target": "code"
+    }
+  ]
+}

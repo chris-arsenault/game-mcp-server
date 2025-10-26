@@ -6,7 +6,9 @@ MCP (Model Context Protocol) server that backs the **genai-game-engine** project
 
 - Node.js 18+
 - Qdrant instance (defaults to `http://qdrant:6333`)
+- Neo4j instance (defaults to `bolt://localhost:7687`)
 - Embedding service exposing `POST /embed` (defaults to `http://embedding-service:80`, see [Embedding Service](#embedding-service))
+- OpenAI API key with access to `gpt-4o-mini` (configurable via `OPENAI_MODEL`)
 
 ## Scripts
 
@@ -103,8 +105,39 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 - `config/collections.json` documents every Qdrant collection, its cardinality, and which Claude agents rely on it.
 - `docs/mcp/usage.md` covers Claude integration and the full MCP tool catalog exposed by the server.
 - Bug-fix memory lives in the `bug_fix_patterns` collection and is accessible via the `record_bug_fix`, `match_bug_fix`, and `get_bug_fix` tools. Error messages can be stored alongside fixes so agents can perform exact log-line lookups before falling back to semantic matches.
+- Knowledge-graph embeddings live in the `code_graph` collection. Use `explore_graph_entity` to pull the Neo4j node plus surrounding relationships, and `search_graph_semantic` for vector search against the graph-builder output.
 
 Use `list_qdrant_collections` and `get_mcp_documentation` to programmatically discover server capabilities from clients.
+
+## Knowledge Graph
+
+Set the following environment variables so the server can reach the graph-builder databases:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NEO4J_URL` | `bolt://localhost:7687` | Bolt endpoint for the Neo4j instance populated by the graph builder |
+| `NEO4J_USER` | `neo4j` | Username for Neo4j auth |
+| `NEO4J_PASSWORD` | `password` | Password for Neo4j auth |
+| `GRAPH_COLLECTION` | `code_graph` | Qdrant collection that holds graph embeddings |
+| `GRAPH_BUILDER_PORT` | `4100` | HTTP port for the graph-builder service |
+| `OPENAI_API_KEY` | _(required)_ | Used by the graph builder to enrich entities |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Override the OpenAI model for semantic enrichment |
+| `OPENAI_TEMPERATURE` | `0` | Optional temperature tweak for enrichment responses |
+| `REPO_URL` | `https://github.com/chris-arsenault/genai-game-engine.git` | Default repository cloned by the builder |
+| `REPO_BRANCH` | `main` | Default branch synced before each build |
+
+The graph builder clones `chris-arsenault/genai-game-engine` into `/mnt/apps/apps/mcp-server/game-mcp/server/source/genai-game-engine` by default and syncs data into Neo4j + Qdrant. Once the builder runs, MCP clients can:
+
+1. Call `search_graph_semantic` with natural-language or code snippets to fetch the most relevant graph entities.
+2. Pass an entity ID (e.g., `file:src/tools/graph.tool.ts`) to `explore_graph_entity` to inspect inbound/outbound relationships straight from Neo4j.
+
+The builder exposes a REST API on `http://<host>:${GRAPH_BUILDER_PORT}`:
+
+- `POST /build` with body `{"mode":"full|incremental","stage":"all|parse|enrich|populate","baseCommit":"...","repoUrl":"...","branch":"..."}` to start a job. `repoUrl` and `branch` default to the service configuration (see env vars above).
+- `GET /status` to poll the current or last run summary.
+- `POST /reset` to clear staging artifacts and the incremental marker.
+
+`POST /build` returns immediately (HTTP 202) after queuing work; use `GET /status` to observe progress and obtain the final summary.
 
 ## Embedding Service
 

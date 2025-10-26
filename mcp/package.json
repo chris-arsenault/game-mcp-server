@@ -18,7 +18,8 @@
     "@qdrant/js-client-rest": "^1.15.1",
     "axios": "^1.12.2",
     "dotenv": "^17.2.3",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "neo4j-driver": "^5.15.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.4",

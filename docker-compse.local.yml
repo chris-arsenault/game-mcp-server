@@ -54,7 +54,7 @@ services:
       - GRAPH_COLLECTION=code_graph
       - NODE_ENV=production
     volumes:
-      - /mnt/apps/apps/mcp-server/game-mcp-server/mcp/config:/app/config
+      - /mnt/apps/apps/mcp-server/game-mcp-server/config:/app/config
     depends_on:
       - qdrant
       - embedding-service
@@ -62,15 +62,13 @@ services:
     networks:
       - mcp-network
   graph-builder:
-    build: /mnt/apps/apps/mcp-server/game-mcp-server/graph-server
+    build: ./graph-builder
     container_name: graph-builder
     ports:
       - "4100:4100"
     environment:
       - REPO_PATH=/repo
       - STAGING_PATH=/staging
-      - REPO_URL=https://github.com/chris-arsenault/genai-game-engine.git
-      - REPO_BRANCH=main
       - GRAPH_BUILDER_PORT=4100
       - NEO4J_URL=bolt://neo4j:7687
       - NEO4J_USER=neo4j
@@ -78,13 +76,13 @@ services:
       - QDRANT_URL=http://qdrant:6333
       - EMBEDDING_URL=http://embedding-service:80
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=gpt-5
-      - OPENAI_TEMPERATURE=0
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-5}
+      - OPENAI_TEMPERATURE=${OPENAI_TEMPERATURE:-0}
       - LOG_LEVEL=info
     volumes:
-      - /mnt/apps/apps/mcp-server/graph-repo:/repo
-      - /mnt/apps/apps/mcp-server/graph-staging:/staging
-      - /mnt/apps/apps/mcp-server/game-mcp-server/graph-server/config:/app/config
+      - /mnt/tank/your-game-repo:/repo:ro        # Mount game repo read-only
+      - /mnt/tank/mcp-stack/graph-staging:/staging
+      - /mnt/tank/mcp-stack/graph-builder/config:/app/config
     depends_on:
       - neo4j
       - qdrant

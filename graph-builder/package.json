@@ -1,0 +1,38 @@
+{
+  "name": "graph-builder",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && node dist/index.js",
+    "dev": "node --loader ts-node/esm src/index.ts",
+    "parse": "node --loader ts-node/esm src/stages/parse.ts",
+    "enrich": "node --loader ts-node/esm src/stages/enrich.ts",
+    "populate": "node --loader ts-node/esm src/stages/populate.ts"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.23.0",
+    "@babel/traverse": "^7.23.0",
+    "@babel/types": "^7.23.0",
+    "@qdrant/js-client-rest": "^1.15.1",
+    "axios": "^1.12.2",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "glob": "^10.3.10",
+    "gray-matter": "^4.0.3",
+    "marked": "^11.0.0",
+    "neo4j-driver": "^5.15.0",
+    "openai": "^4.57.0",
+    "simple-git": "^3.21.0",
+    "winston": "^3.11.0",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/babel__traverse": "^7.20.4",
+    "@types/node": "^24.9.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

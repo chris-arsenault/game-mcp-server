@@ -101,4 +101,15 @@ curl -sS -X PUT "${QDRANT_URL}/collections/bug_fix_patterns" \
     "on_disk_payload": true
   }'
 
+# Knowledge graph collection
+curl -sS -X PUT "${QDRANT_URL}/collections/code_graph" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 768,
+      "distance": "Cosine"
+    },
+    "on_disk_payload": true
+  }'
+
 echo "Collections created successfully"
