@@ -62,10 +62,10 @@ services:
     networks:
       - mcp-network
   graph-builder:
-    build: /mnt/apps/apps/mcp-server/game-mcp-server/graph-server
+    build: /mnt/apps/apps/mcp-server/game-mcp-server/graph-builder
     container_name: graph-builder
     ports:
-      - "4100:4100"
+      - "5346:4100"
     environment:
       - REPO_PATH=/repo
       - STAGING_PATH=/staging
@@ -84,7 +84,7 @@ services:
     volumes:
       - /mnt/apps/apps/mcp-server/graph-repo:/repo
       - /mnt/apps/apps/mcp-server/graph-staging:/staging
-      - /mnt/apps/apps/mcp-server/game-mcp-server/graph-server/config:/app/config
+      - /mnt/apps/apps/mcp-server/game-mcp-server/graph-builder/config:/app/config
     depends_on:
       - neo4j
       - qdrant
