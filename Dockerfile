@@ -5,7 +5,7 @@ WORKDIR /app
 RUN apk add --no-cache curl
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 
 COPY . .
 RUN chmod +x /app/entrypoint.sh /app/init-collections.sh
