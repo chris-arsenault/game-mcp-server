@@ -30,6 +30,7 @@ export class GameDevMCPServer {
     private tools: Map<string, any>;
     private httpServer?: HttpServer;
     private transport?: StreamableHTTPServerTransport;
+    private sseSessions: Map<string, SSEServerTransport>;
 
     constructor() {
         this.server = new Server(
@@ -52,6 +53,7 @@ export class GameDevMCPServer {
             process.env.EMBEDDING_URL || "http://localhost:8080"
         );
         this.cache = new CacheService();
+        this.sseSessions = new Map();
 
         // Initialize tools
         this.tools = new Map();
@@ -608,15 +610,56 @@ export class GameDevMCPServer {
             }
         };
 
-        app.get("/sse", async (req, res) => {
-            const transport = new SSEServerTransport("/messages", res);
-            await this.server.connect(transport);
+        app.get("/sse", async (req, res, next) => {
+            try {
+                const transport = new SSEServerTransport("/messages", res);
+                transport.onclose = () => {
+                    this.sseSessions.delete(transport.sessionId);
+                };
+                transport.onerror = (error) => {
+                    console.error("SSE transport error:", error);
+                };
+                await this.server.connect(transport);
+                this.sseSessions.set(transport.sessionId, transport);
+            } catch (error) {
+                next(error);
+            }
         });
 
-        // Message endpoint for client requests
-        app.post("/messages", express.json(), async (req, res) => {
-            // Handle incoming messages
-            // The SSEServerTransport handles this automatically
+        // Endpoint for JSON-RPC messages sent over SSE transport
+        app.post("/messages", async (req, res) => {
+            const querySessionId = req.query.sessionId;
+            if (Array.isArray(querySessionId)) {
+                return res.status(400).json({ error: "Only a single sessionId may be provided" });
+            }
+
+            if (querySessionId && typeof querySessionId !== "string") {
+                return res.status(400).json({ error: "sessionId must be provided as a string" });
+            }
+
+            const headerSessionId = req.header("Mcp-Session-Id");
+            if (Array.isArray(headerSessionId)) {
+                return res.status(400).json({ error: "Only a single Mcp-Session-Id header may be provided" });
+            }
+
+            const sessionId = querySessionId ?? headerSessionId;
+            if (!sessionId) {
+                return res.status(400).json({ error: "Missing sessionId" });
+            }
+
+            const transport = this.sseSessions.get(sessionId);
+            if (!transport) {
+                return res.status(404).json({ error: "Session not found" });
+            }
+
+            try {
+                await transport.handlePostMessage(req, res, req.body);
+            } catch (error) {
+                console.error("Error handling SSE message:", error);
+                if (!res.headersSent) {
+                    res.status(500).json({ error: "Internal server error" });
+                }
+            }
         });
 
         app.post(routerPath, postHandler);
