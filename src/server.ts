@@ -21,6 +21,7 @@ import { DialogueTool } from "./tools/dialogue.tool.js";
 import { TestingTool } from "./tools/testing.tool.js";
 import { FeedbackTool } from "./tools/feedback.tool.js";
 import { MetadataTool } from "./tools/metadata.tool.js";
+import { BugFixTool } from "./tools/bugfix.tool.js";
 
 export class GameDevMCPServer {
     private server: Server;
@@ -100,6 +101,7 @@ export class GameDevMCPServer {
             this.cache
         );
         const metadataTool = new MetadataTool(this.cache);
+        const bugFixTool = new BugFixTool(this.qdrant, this.embedding);
 
         // Register research tools
         this.tools.set("cache_research", researchTool.cacheResearch.bind(researchTool));
@@ -144,6 +146,9 @@ export class GameDevMCPServer {
         this.tools.set("record_playtest_feedback", feedbackTool.recordFeedback.bind(feedbackTool));
         this.tools.set("query_playtest_feedback", feedbackTool.queryFeedback.bind(feedbackTool));
         this.tools.set("summarize_playtest_feedback", feedbackTool.summarizeFeedback.bind(feedbackTool));
+        this.tools.set("record_bug_fix", bugFixTool.recordBugFix.bind(bugFixTool));
+        this.tools.set("match_bug_fix", bugFixTool.matchBugFix.bind(bugFixTool));
+        this.tools.set("get_bug_fix", bugFixTool.getBugFix.bind(bugFixTool));
 
         // Register metadata/discovery tools
         this.tools.set("get_server_metadata", metadataTool.getServerMetadata.bind(metadataTool));
@@ -167,6 +172,49 @@ export class GameDevMCPServer {
                             tags: { type: "array", items: { type: "string" }, description: "Categorization tags" }
                         },
                         required: ["topic", "findings"]
+                    }
+                },
+                {
+                    name: "record_bug_fix",
+                    description: "Store a canonical fix pattern alongside the incorrect code patterns it replaces.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            issue: { type: "string", description: "Short identifier for the recurring bug or refactor (e.g., 'config-loader-null-check')." },
+                            summary: { type: "string", description: "Context describing when this bug appears and why the fix is preferred." },
+                            correct_pattern: { type: "string", description: "Code snippet or instructions that represent the proven fix." },
+                            incorrect_patterns: { type: "array", items: { type: "string" }, description: "Example snippets or anti-pattern descriptions that should trigger this fix." },
+                            error_messages: { type: "array", items: { type: "string" }, description: "Representative error log lines or messages that should map directly to this fix." },
+                            tags: { type: "array", items: { type: "string" }, description: "Optional tags (e.g., 'typescript', 'api-layer')." },
+                            source: { type: "string", description: "Optional link or reference explaining the fix (PR, issue, doc)." }
+                        },
+                        required: ["issue", "summary", "correct_pattern", "incorrect_patterns"]
+                    }
+                },
+                {
+                    name: "match_bug_fix",
+                    description: "Match an error report or code snippet to known bug fixes and retrieve their canonical patch.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string", description: "Symptoms, log snippets, or problematic code to match against stored fixes." },
+                            errorMessage: { type: "string", description: "Exact error message to look up before falling back to semantic similarity." },
+                            limit: { type: "number", description: "Max fixes to return", default: 5 },
+                            minScore: { type: "number", description: "Minimum similarity score (0-1)", default: 0.6 },
+                            tag: { type: "string", description: "Optional tag filter (e.g., 'typescript')." }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "get_bug_fix",
+                    description: "Fetch a stored bug fix by its issue identifier.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            issue: { type: "string", description: "Identifier used when the fix was recorded." }
+                        },
+                        required: ["issue"]
                     }
                 },
                 {

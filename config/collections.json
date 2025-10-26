@@ -55,6 +55,13 @@
       "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["playtester", "optimizer", "gameplay-dev"]
+    },
+    {
+      "name": "bug_fix_patterns",
+      "description": "Canonical bug fixes paired with the incorrect code patterns they replace.",
+      "dimension": 768,
+      "distance": "Cosine",
+      "primaryAgents": ["engine-dev", "test-engineer", "optimizer"]
     }
   ]
 }

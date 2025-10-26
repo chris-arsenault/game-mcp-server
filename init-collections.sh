@@ -90,4 +90,15 @@ curl -sS -X PUT "${QDRANT_URL}/collections/gameplay_feedback" \
     }
   }'
 
+# Bug fix patterns collection
+curl -sS -X PUT "${QDRANT_URL}/collections/bug_fix_patterns" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "vectors": {
+      "size": 768,
+      "distance": "Cosine"
+    },
+    "on_disk_payload": true
+  }'
+
 echo "Collections created successfully"

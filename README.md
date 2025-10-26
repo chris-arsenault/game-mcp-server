@@ -102,6 +102,7 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 
 - `config/collections.json` documents every Qdrant collection, its cardinality, and which Claude agents rely on it.
 - `docs/mcp/usage.md` covers Claude integration and the full MCP tool catalog exposed by the server.
+- Bug-fix memory lives in the `bug_fix_patterns` collection and is accessible via the `record_bug_fix`, `match_bug_fix`, and `get_bug_fix` tools. Error messages can be stored alongside fixes so agents can perform exact log-line lookups before falling back to semantic matches.
 
 Use `list_qdrant_collections` and `get_mcp_documentation` to programmatically discover server capabilities from clients.
 
