@@ -6,7 +6,7 @@ MCP (Model Context Protocol) server that backs the **genai-game-engine** project
 
 - Node.js 18+
 - Qdrant instance (defaults to `http://qdrant:6333`)
-- Embedding service exposing `POST /embed` (defaults to `http://embedding-service:80`)
+- Embedding service exposing `POST /embed` (defaults to `http://embedding-service:80`, see [Embedding Service](#embedding-service))
 
 ## Scripts
 
@@ -104,3 +104,15 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 - `docs/mcp/usage.md` covers Claude integration and the full MCP tool catalog exposed by the server.
 
 Use `list_qdrant_collections` and `get_mcp_documentation` to programmatically discover server capabilities from clients.
+
+## Embedding Service
+
+The provided `docker-compse.yml` now launches Hugging Face Text Embeddings Inference on CPU with the `jinaai/jina-embeddings-v2-base-en` model. This bumps the context window to 8192 tokens and output dimensionality to 768, providing significantly more headroom for large requests while remaining practical on a TrueNAS box with dual Xeon E5 CPUs and 128 GB RAM. Because the vector size changed, run `./init-collections.sh` (or recreate the Qdrant collections manually) before ingesting new data.
+
+The container mounts `/mnt/apps/apps/mcp-server/embedding-cache` and sets `MODEL_CACHE=/data`, so model weights persist across restarts. To pre-seed the cache on an offline machine:
+
+```bash
+huggingface-cli download jinaai/jina-embeddings-v2-base-en --local-dir /mnt/apps/apps/mcp-server/embedding-cache
+```
+
+The embedding client in `src/services/embedding.service.ts` now surfaces HTTP error bodies (e.g. token-limit warnings) directly in the logs to make diagnosing misconfiguration easier.

@@ -16,9 +16,10 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     container_name: embedding-service
     environment:
-      - MODEL_ID=sentence-transformers/all-MiniLM-L6-v2
+      - MODEL_ID=jinaai/jina-embeddings-v2-base-en
       - REVISION=main
       - MAX_BATCH_SIZE=32
+      - MODEL_CACHE=/data
     volumes:
       - /mnt/apps/apps/mcp-server/embedding-cache:/data
     restart: unless-stopped

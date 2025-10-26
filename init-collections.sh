@@ -9,7 +9,7 @@ curl -sS -X PUT "${QDRANT_URL}/collections/research_findings" \
   -H 'Content-Type: application/json' \
   -d '{
     "vectors": {
-      "size": 384,
+      "size": 768,
       "distance": "Cosine"
     },
     "optimizers_config": {
@@ -22,7 +22,7 @@ curl -sS -X PUT "${QDRANT_URL}/collections/architectural_patterns" \
   -H 'Content-Type: application/json' \
   -d '{
     "vectors": {
-      "size": 384,
+      "size": 768,
       "distance": "Cosine"
     }
   }'
@@ -32,7 +32,7 @@ curl -sS -X PUT "${QDRANT_URL}/collections/code_implementations" \
   -H 'Content-Type: application/json' \
   -d '{
     "vectors": {
-      "size": 384,
+      "size": 768,
       "distance": "Cosine"
     }
   }'
@@ -42,7 +42,7 @@ curl -sS -X PUT "${QDRANT_URL}/collections/narrative_design" \
   -H 'Content-Type: application/json' \
   -d '{
     "vectors": {
-      "size": 384,
+      "size": 768,
       "distance": "Cosine"
     },
     "on_disk_payload": true
@@ -53,7 +53,7 @@ curl -sS -X PUT "${QDRANT_URL}/collections/world_building" \
   -H 'Content-Type: application/json' \
   -d '{
     "vectors": {
-      "size": 384,
+      "size": 768,
       "distance": "Cosine"
     },
     "on_disk_payload": true
@@ -64,7 +64,7 @@ curl -sS -X PUT "${QDRANT_URL}/collections/dialogue_snippets" \
   -H 'Content-Type: application/json' \
   -d '{
     "vectors": {
-      "size": 384,
+      "size": 768,
       "distance": "Cosine"
     },
     "on_disk_payload": true
@@ -75,7 +75,7 @@ curl -sS -X PUT "${QDRANT_URL}/collections/test_strategies" \
   -H 'Content-Type: application/json' \
   -d '{
     "vectors": {
-      "size": 384,
+      "size": 768,
       "distance": "Cosine"
     }
   }'
@@ -85,7 +85,7 @@ curl -sS -X PUT "${QDRANT_URL}/collections/gameplay_feedback" \
   -H 'Content-Type: application/json' \
   -d '{
     "vectors": {
-      "size": 384,
+      "size": 768,
       "distance": "Cosine"
     }
   }'

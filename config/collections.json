@@ -3,56 +3,56 @@
     {
       "name": "research_findings",
       "description": "Research reports, mechanic studies, and genre mashup references.",
-      "dimension": 384,
+      "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["research-engine", "research-features", "architect"]
     },
     {
       "name": "architectural_patterns",
       "description": "Architecture decisions, system designs, and technical rationale.",
-      "dimension": 384,
+      "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["architect", "engine-dev"]
     },
     {
       "name": "code_implementations",
       "description": "Code patterns, reference implementations, and reusable gameplay systems.",
-      "dimension": 384,
+      "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["engine-dev", "gameplay-dev"]
     },
     {
       "name": "narrative_design",
       "description": "Acts, quests, characters, and thematic story beats for narrative teams.",
-      "dimension": 384,
+      "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["narrative-writer", "narrative-dialog", "narrative-world-building"]
     },
     {
       "name": "world_building",
       "description": "Lore bibles, factions, locations, and cultural references.",
-      "dimension": 384,
+      "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["narrative-world-building", "documenter"]
     },
     {
       "name": "dialogue_snippets",
       "description": "Dialogue scenes, branching conversations, and tone references.",
-      "dimension": 384,
+      "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["narrative-dialog", "narrative-writer"]
     },
     {
       "name": "test_strategies",
       "description": "Test strategies and coverage plans for systems and narrative branches.",
-      "dimension": 384,
+      "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["test-engineer", "playtester"]
     },
     {
       "name": "gameplay_feedback",
       "description": "Playtest feedback, qualitative reports, and player sentiment summaries.",
-      "dimension": 384,
+      "dimension": 768,
       "distance": "Cosine",
       "primaryAgents": ["playtester", "optimizer", "gameplay-dev"]
     }
