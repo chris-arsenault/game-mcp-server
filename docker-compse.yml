@@ -40,7 +40,7 @@ services:
       - EMBEDDING_URL=http://embedding-service:80
       - NODE_ENV=production
     volumes:
-      - /mnt/apps/apps/mcp-server/config:/app/config
+      - /mnt/apps/apps/mcp-server/game-mcp-server/config:/app/config
     depends_on:
       - qdrant
       - embedding-service
