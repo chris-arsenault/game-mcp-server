@@ -103,7 +103,8 @@ Expected JSON schema:
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
                 ],
-                max_tokens: 500
+                max_completion_tokens: 500,
+                response_format: { type: 'json_object' }
             });
 
             const rawContent = response.choices[0]?.message?.content;
