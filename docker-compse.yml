@@ -16,7 +16,7 @@ services:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     container_name: embedding-service
     environment:
-      - MODEL_ID=jinaai/jina-embeddings-v2-base-en
+      - MODEL_ID=nomic-ai/nomic-embed-text-v1.5
       - REVISION=main
       - MAX_BATCH_SIZE=32
       - MODEL_CACHE=/data

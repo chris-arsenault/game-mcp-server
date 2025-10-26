@@ -107,12 +107,12 @@ Use `list_qdrant_collections` and `get_mcp_documentation` to programmatically di
 
 ## Embedding Service
 
-The provided `docker-compse.yml` now launches Hugging Face Text Embeddings Inference on CPU with the `jinaai/jina-embeddings-v2-base-en` model. This bumps the context window to 8192 tokens and output dimensionality to 768, providing significantly more headroom for large requests while remaining practical on a TrueNAS box with dual Xeon E5 CPUs and 128 GB RAM. Because the vector size changed, run `./init-collections.sh` (or recreate the Qdrant collections manually) before ingesting new data.
+The provided `docker-compse.yml` now launches Hugging Face Text Embeddings Inference on CPU with the `nomic-ai/nomic-embed-text-v1.5` model. It supports an 8192-token context window and 768-dimensional embeddings—ample room for long tool payloads while remaining practical on a dual Xeon E5 / 128 GB RAM TrueNAS box. Because the vector size changed relative to the original setup, run `./init-collections.sh` (or recreate the Qdrant collections manually) before ingesting new data.
 
 The container mounts `/mnt/apps/apps/mcp-server/embedding-cache` and sets `MODEL_CACHE=/data`, so model weights persist across restarts. To pre-seed the cache on an offline machine:
 
 ```bash
-huggingface-cli download jinaai/jina-embeddings-v2-base-en --local-dir /mnt/apps/apps/mcp-server/embedding-cache
+huggingface-cli download nomic-ai/nomic-embed-text-v1.5 --local-dir /mnt/apps/apps/mcp-server/embedding-cache
 ```
 
 The embedding client in `src/services/embedding.service.ts` now surfaces HTTP error bodies (e.g. token-limit warnings) directly in the logs to make diagnosing misconfiguration easier.
