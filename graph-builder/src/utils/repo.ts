@@ -1,7 +1,7 @@
 import { mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
-import simpleGit from "simple-git";
+import { simpleGit } from "simple-git";
 import { logger } from "./logger.js";
 
 export async function syncRepository(
