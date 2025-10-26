@@ -27,7 +27,7 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 1. **Initialize the session**
 
    ```bash
-   curl -i -X POST http://localhost:3000/mcp \
+   curl -i -X POST https://mcp.local.ahara.io/mcp \
      -H 'Content-Type: application/json' \
      -H 'Accept: application/json, text/event-stream' \
      -d '{

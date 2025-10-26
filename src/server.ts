@@ -1,4 +1,5 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
     CallToolRequestSchema,
@@ -606,6 +607,17 @@ export class GameDevMCPServer {
                 next(error);
             }
         };
+
+        app.get("/sse", async (req, res) => {
+            const transport = new SSEServerTransport("/messages", res);
+            await this.server.connect(transport);
+        });
+
+        // Message endpoint for client requests
+        app.post("/messages", express.json(), async (req, res) => {
+            // Handle incoming messages
+            // The SSEServerTransport handles this automatically
+        });
 
         app.post(routerPath, postHandler);
         app.get(routerPath, genericHandler);
