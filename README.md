@@ -139,6 +139,23 @@ The builder exposes a REST API on `http://<host>:${GRAPH_BUILDER_PORT}`:
 
 `POST /build` returns immediately (HTTP 202) after queuing work; use `GET /status` to observe progress and obtain the final summary.
 
+Example: trigger a full rebuild (all stages, default repo/branch) from localhost using curl:
+
+```bash
+curl -s -X POST http://localhost:5346/build \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "mode": "full",
+    "stage": "all"
+  }'
+```
+
+Then poll:
+
+```bash
+curl -s http://localhost:4100/status | jq '.'
+```
+
 ## Embedding Service
 
 The provided `docker-compse.yml` now launches Hugging Face Text Embeddings Inference on CPU with the `nomic-ai/nomic-embed-text-v1.5` model. It supports an 8192-token context window and 768-dimensional embeddings—ample room for long tool payloads while remaining practical on a dual Xeon E5 / 128 GB RAM TrueNAS box. Because the vector size changed relative to the original setup, run `./init-collections.sh` (or recreate the Qdrant collections manually) before ingesting new data.

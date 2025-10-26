@@ -44,9 +44,20 @@ export class JavaScriptParser {
             });
 
             type TraverseFunction = (node: t.Node, opts?: TraverseOptions) => void;
-            const traverseFn: TraverseFunction =
-                ((babelTraverse as unknown as { default?: TraverseFunction }).default) ??
-                (babelTraverse as unknown as TraverseFunction);
+            const candidate =
+                ((babelTraverse as unknown as { default?: unknown }).default) ??
+                (babelTraverse as unknown as unknown);
+
+            const traverseFn: TraverseFunction | null =
+                typeof candidate === 'function'
+                    ? (candidate as TraverseFunction)
+                    : typeof (candidate as { default?: unknown })?.default === 'function'
+                        ? ((candidate as { default: TraverseFunction }).default)
+                        : null;
+
+            if (!traverseFn) {
+                throw new Error('Unable to resolve @babel/traverse export.');
+            }
 
             const visitor: TraverseOptions = {
                 ImportDeclaration: (astPath: NodePath<t.ImportDeclaration>) => {
