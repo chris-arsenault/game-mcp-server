@@ -1,0 +1,647 @@
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import {
+    CallToolRequestSchema,
+    ListToolsRequestSchema,
+} from "@modelcontextprotocol/sdk/types.js";
+import express, { Request, Response, NextFunction } from "express";
+import { Server as HttpServer } from "http";
+import { randomUUID } from "crypto";
+import { QdrantService } from "./services/qdrant.service.js";
+import { EmbeddingService } from "./services/embedding.service.js";
+import { CacheService } from "./services/cache.service.js";
+import { ResearchTool } from "./tools/research.tool.js";
+import { PatternTool } from "./tools/pattern.tool.js";
+import { ArchitectureTool } from "./tools/architecture.tool.js";
+import { ValidationTool } from "./tools/validation.tool.js";
+import { NarrativeTool } from "./tools/narrative.tool.js";
+import { WorldbuildingTool } from "./tools/worldbuilding.tool.js";
+import { DialogueTool } from "./tools/dialogue.tool.js";
+import { TestingTool } from "./tools/testing.tool.js";
+import { FeedbackTool } from "./tools/feedback.tool.js";
+import { MetadataTool } from "./tools/metadata.tool.js";
+
+export class GameDevMCPServer {
+    private server: Server;
+    private qdrant: QdrantService;
+    private embedding: EmbeddingService;
+    private cache: CacheService;
+    private tools: Map<string, any>;
+    private httpServer?: HttpServer;
+    private transport?: StreamableHTTPServerTransport;
+
+    constructor() {
+        this.server = new Server(
+            {
+                name: "game-dev-mcp",
+                version: "1.0.0",
+            },
+            {
+                capabilities: {
+                    tools: {},
+                },
+            }
+        );
+
+        // Initialize services
+        this.qdrant = new QdrantService(
+            process.env.QDRANT_URL || "http://localhost:6333"
+        );
+        this.embedding = new EmbeddingService(
+            process.env.EMBEDDING_URL || "http://localhost:8080"
+        );
+        this.cache = new CacheService();
+
+        // Initialize tools
+        this.tools = new Map();
+        this.initializeTools();
+        this.setupHandlers();
+    }
+
+    private initializeTools() {
+        const researchTool = new ResearchTool(this.qdrant, this.embedding);
+        const patternTool = new PatternTool(this.qdrant, this.embedding);
+        const architectureTool = new ArchitectureTool(
+            this.qdrant,
+            this.embedding,
+            this.cache
+        );
+        const validationTool = new ValidationTool(
+            this.qdrant,
+            this.embedding,
+            this.cache
+        );
+        const narrativeTool = new NarrativeTool(
+            this.qdrant,
+            this.embedding,
+            this.cache
+        );
+        const worldbuildingTool = new WorldbuildingTool(
+            this.qdrant,
+            this.embedding,
+            this.cache
+        );
+        const dialogueTool = new DialogueTool(
+            this.qdrant,
+            this.embedding,
+            this.cache
+        );
+        const testingTool = new TestingTool(
+            this.qdrant,
+            this.embedding,
+            this.cache
+        );
+        const feedbackTool = new FeedbackTool(
+            this.qdrant,
+            this.embedding,
+            this.cache
+        );
+        const metadataTool = new MetadataTool(this.cache);
+
+        // Register research tools
+        this.tools.set("cache_research", researchTool.cacheResearch.bind(researchTool));
+        this.tools.set("query_research", researchTool.queryResearch.bind(researchTool));
+        this.tools.set("check_research_exists", researchTool.checkExists.bind(researchTool));
+
+        // Register pattern tools
+        this.tools.set("store_pattern", patternTool.storePattern.bind(patternTool));
+        this.tools.set("find_similar_patterns", patternTool.findSimilar.bind(patternTool));
+        this.tools.set("get_pattern_by_name", patternTool.getByName.bind(patternTool));
+
+        // Register architecture tools
+        this.tools.set("store_architecture_decision", architectureTool.storeDecision.bind(architectureTool));
+        this.tools.set("query_architecture", architectureTool.queryDecisions.bind(architectureTool));
+        this.tools.set("get_architecture_history", architectureTool.getHistory.bind(architectureTool));
+
+        // Register validation tools
+        this.tools.set("validate_against_patterns", validationTool.validatePatterns.bind(validationTool));
+        this.tools.set("check_consistency", validationTool.checkConsistency.bind(validationTool));
+
+        // Register narrative tools
+        this.tools.set("store_narrative_element", narrativeTool.storeNarrativeElement.bind(narrativeTool));
+        this.tools.set("search_narrative_elements", narrativeTool.searchNarrativeElements.bind(narrativeTool));
+        this.tools.set("get_narrative_outline", narrativeTool.getNarrativeOutline.bind(narrativeTool));
+
+        // Register worldbuilding tools
+        this.tools.set("store_lore_entry", worldbuildingTool.storeLoreEntry.bind(worldbuildingTool));
+        this.tools.set("search_lore", worldbuildingTool.searchLore.bind(worldbuildingTool));
+        this.tools.set("list_lore", worldbuildingTool.listLore.bind(worldbuildingTool));
+
+        // Register dialogue tools
+        this.tools.set("store_dialogue_scene", dialogueTool.storeDialogueScene.bind(dialogueTool));
+        this.tools.set("find_dialogue", dialogueTool.findDialogue.bind(dialogueTool));
+        this.tools.set("get_dialogue_scene", dialogueTool.getScene.bind(dialogueTool));
+
+        // Register testing tools
+        this.tools.set("store_test_strategy", testingTool.storeTestStrategy.bind(testingTool));
+        this.tools.set("query_test_strategies", testingTool.queryTestStrategies.bind(testingTool));
+        this.tools.set("list_test_strategies_by_focus", testingTool.listByFocusArea.bind(testingTool));
+
+        // Register feedback tools
+        this.tools.set("record_playtest_feedback", feedbackTool.recordFeedback.bind(feedbackTool));
+        this.tools.set("query_playtest_feedback", feedbackTool.queryFeedback.bind(feedbackTool));
+        this.tools.set("summarize_playtest_feedback", feedbackTool.summarizeFeedback.bind(feedbackTool));
+
+        // Register metadata/discovery tools
+        this.tools.set("get_server_metadata", metadataTool.getServerMetadata.bind(metadataTool));
+        this.tools.set("list_qdrant_collections", metadataTool.listCollections.bind(metadataTool));
+        this.tools.set("get_mcp_documentation", metadataTool.getDocumentation.bind(metadataTool));
+    }
+
+    private setupHandlers() {
+        // List available tools
+        this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+            tools: [
+                {
+                    name: "cache_research",
+                    description: "Cache research findings for future reuse. Prevents redundant research on same topics.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            topic: { type: "string", description: "Research topic identifier (e.g., 'ECS-architecture', 'procedural-dungeon-generation')" },
+                            findings: { type: "string", description: "Full research findings text" },
+                            sources: { type: "array", items: { type: "string" }, description: "URLs or references" },
+                            tags: { type: "array", items: { type: "string" }, description: "Categorization tags" }
+                        },
+                        required: ["topic", "findings"]
+                    }
+                },
+                {
+                    name: "query_research",
+                    description: "Query cached research by semantic similarity. Returns relevant past research.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string", description: "What you're looking for" },
+                            limit: { type: "number", description: "Max results to return", default: 5 },
+                            min_score: { type: "number", description: "Minimum similarity score (0-1)", default: 0.7 }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "check_research_exists",
+                    description: "Check if research already exists for a topic before starting new research.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            topic: { type: "string", description: "Topic to check" }
+                        },
+                        required: ["topic"]
+                    }
+                },
+                {
+                    name: "store_pattern",
+                    description: "Store a code or design pattern for future reference and consistency.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            name: { type: "string", description: "Pattern name (e.g., 'component-lifecycle')" },
+                            description: { type: "string", description: "What this pattern does" },
+                            code: { type: "string", description: "Code example" },
+                            usage: { type: "string", description: "When to use this pattern" },
+                            category: { type: "string", description: "Pattern category (architecture/gameplay/rendering/etc)" }
+                        },
+                        required: ["name", "description", "code"]
+                    }
+                },
+                {
+                    name: "find_similar_patterns",
+                    description: "Find patterns similar to current work to maintain consistency.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            description: { type: "string", description: "Describe what you're implementing" },
+                            category: { type: "string", description: "Filter by category" },
+                            limit: { type: "number", default: 5 }
+                        },
+                        required: ["description"]
+                    }
+                },
+                {
+                    name: "get_pattern_by_name",
+                    description: "Retrieve exact pattern by name.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            name: { type: "string", description: "Exact pattern name" }
+                        },
+                        required: ["name"]
+                    }
+                },
+                {
+                    name: "store_architecture_decision",
+                    description: "Record architectural decisions with rationale for future reference.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            decision: { type: "string", description: "What was decided" },
+                            rationale: { type: "string", description: "Why this decision was made" },
+                            alternatives: { type: "array", items: { type: "string" }, description: "Options considered" },
+                            scope: { type: "string", description: "What this decision affects" },
+                            date: { type: "string", description: "ISO date of decision" }
+                        },
+                        required: ["decision", "rationale"]
+                    }
+                },
+                {
+                    name: "query_architecture",
+                    description: "Query architectural decisions by topic.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string", description: "What to search for" },
+                            limit: { type: "number", default: 5 }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "validate_against_patterns",
+                    description: "Validate code/design against established patterns to catch inconsistencies.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            content: { type: "string", description: "Code or design to validate" },
+                            type: { type: "string", description: "What's being validated (code/architecture/test)" }
+                        },
+                        required: ["content", "type"]
+                    }
+                },
+                {
+                    name: "check_consistency",
+                    description: "Check if new work is consistent with existing patterns and decisions.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            description: { type: "string", description: "Describe the new work" },
+                            category: { type: "string", description: "Category of work" }
+                        },
+                        required: ["description"]
+                    }
+                },
+                {
+                    name: "store_narrative_element",
+                    description: "Store story beats, quests, character arcs, or thematic notes for the game's narrative.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            title: { type: "string", description: "Name of the narrative element" },
+                            type: { type: "string", description: "Element type (act, quest, character, beat, faction, lore, theme, mechanic)" },
+                            summary: { type: "string", description: "Short synopsis" },
+                            details: { type: "string", description: "Extended notes or script" },
+                            act: { type: "string", description: "Act identifier" },
+                            chapter: { type: "string", description: "Chapter identifier" },
+                            tags: { type: "array", items: { type: "string" }, description: "Classification tags" },
+                            related_ids: { type: "array", items: { type: "string" }, description: "IDs of related narrative elements" },
+                            order: { type: "number", description: "Ordering index within act/chapter" },
+                            author: { type: "string", description: "Contributor name" },
+                            status: { type: "string", description: "Draft/approved/deprecated" },
+                            attachments: { type: "array", items: { type: "string" }, description: "External references or asset IDs" }
+                        },
+                        required: ["title", "type", "summary"]
+                    }
+                },
+                {
+                    name: "search_narrative_elements",
+                    description: "Search narrative library for similar elements (acts, quests, characters) by semantic meaning.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string", description: "What you want to find" },
+                            type: { type: "string", description: "Filter by element type" },
+                            tags: { type: "array", items: { type: "string" }, description: "Filter by tags" },
+                            limit: { type: "number", default: 5 },
+                            min_score: { type: "number", default: 0.62 }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "get_narrative_outline",
+                    description: "Retrieve ordered narrative elements for an act/chapter to keep story structure aligned.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            act: { type: "string", description: "Act identifier" },
+                            chapter: { type: "string", description: "Chapter identifier" },
+                            type: { type: "string", description: "Filter by element type" },
+                            limit: { type: "number", default: 50 },
+                            order: { type: "string", enum: ["asc", "desc"], default: "asc" }
+                        }
+                    }
+                },
+                {
+                    name: "store_lore_entry",
+                    description: "Store worldbuilding lore such as factions, locations, artifacts, and historical notes.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            title: { type: "string" },
+                            category: { type: "string", description: "Type of lore (faction, location, artifact, history, culture)" },
+                            content: { type: "string", description: "Rich lore description" },
+                            region: { type: "string" },
+                            era: { type: "string" },
+                            factions: { type: "array", items: { type: "string" }, description: "Related factions" },
+                            tags: { type: "array", items: { type: "string" } },
+                            related_ids: { type: "array", items: { type: "string" } },
+                            attachments: { type: "array", items: { type: "string" } }
+                        },
+                        required: ["title", "category", "content"]
+                    }
+                },
+                {
+                    name: "search_lore",
+                    description: "Semantically search lore database by region, category, or tags.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string" },
+                            category: { type: "string" },
+                            region: { type: "string" },
+                            tags: { type: "array", items: { type: "string" } },
+                            limit: { type: "number", default: 5 },
+                            min_score: { type: "number", default: 0.6 }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "list_lore",
+                    description: "List lore entries for coordination (e.g., all regions or factions).",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            region: { type: "string" },
+                            category: { type: "string" },
+                            limit: { type: "number", default: 50 }
+                        }
+                    }
+                },
+                {
+                    name: "store_dialogue_scene",
+                    description: "Store branching dialogue scripts with character context and tone.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            scene: { type: "string", description: "Unique scene identifier" },
+                            characters: { type: "array", items: { type: "string" }, description: "Characters present" },
+                            context: { type: "string", description: "Scene setup and intent" },
+                            script: { type: "string", description: "Dialogue script with branching notes" },
+                            branching: { type: "object", additionalProperties: { type: "string" }, description: "Branch key to script snippet" },
+                            tags: { type: "array", items: { type: "string" } },
+                            tone: { type: "string" }
+                        },
+                        required: ["scene", "characters", "context", "script"]
+                    }
+                },
+                {
+                    name: "find_dialogue",
+                    description: "Search stored dialogue scenes/snippets for reuse or consistency checks.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string" },
+                            character: { type: "string" },
+                            tone: { type: "string" },
+                            tags: { type: "array", items: { type: "string" } },
+                            limit: { type: "number", default: 5 },
+                            min_score: { type: "number", default: 0.58 }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "get_dialogue_scene",
+                    description: "Fetch a dialogue scene by its identifier including branches and metadata.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            scene_id: { type: "string", description: "Scene identifier" }
+                        },
+                        required: ["scene_id"]
+                    }
+                },
+                {
+                    name: "store_test_strategy",
+                    description: "Document a test strategy covering hybrid gameplay, narrative branches, or engine systems.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            title: { type: "string" },
+                            focus_area: { type: "string", description: "System or gameplay area under test" },
+                            scenario: { type: "string", description: "Test scenario narrative" },
+                            coverage: { type: "array", items: { type: "string" }, description: "Checklist of covered behaviors" },
+                            automated: { type: "boolean", description: "Whether automated tests exist" },
+                            status: { type: "string" },
+                            tags: { type: "array", items: { type: "string" } },
+                            author: { type: "string" }
+                        },
+                        required: ["title", "focus_area", "scenario", "coverage"]
+                    }
+                },
+                {
+                    name: "query_test_strategies",
+                    description: "Search test strategies to avoid regression gaps and share coverage plans.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string" },
+                            focus_area: { type: "string" },
+                            automated: { type: "boolean" },
+                            tags: { type: "array", items: { type: "string" } },
+                            limit: { type: "number", default: 5 },
+                            min_score: { type: "number", default: 0.6 }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "list_test_strategies_by_focus",
+                    description: "List up to 100 test strategies for a given focus area.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            focusArea: { type: "string", description: "Focus area identifier" }
+                        },
+                        required: ["focusArea"]
+                    }
+                },
+                {
+                    name: "record_playtest_feedback",
+                    description: "Record structured gameplay or narrative feedback from playtests.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            source: { type: "string", description: "Who/what generated the feedback" },
+                            experience: { type: "string", description: "Summary of the session" },
+                            positives: { type: "array", items: { type: "string" } },
+                            negatives: { type: "array", items: { type: "string" } },
+                            suggestions: { type: "array", items: { type: "string" } },
+                            build: { type: "string", description: "Build identifier" },
+                            tags: { type: "array", items: { type: "string" } },
+                            severity: { type: "string", enum: ["low", "medium", "high", "critical"] }
+                        },
+                        required: ["source", "experience", "positives", "negatives"]
+                    }
+                },
+                {
+                    name: "query_playtest_feedback",
+                    description: "Search recorded feedback for similar issues or player sentiment.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string" },
+                            severity: { type: "string", enum: ["low", "medium", "high", "critical"] },
+                            tags: { type: "array", items: { type: "string" } },
+                            limit: { type: "number", default: 10 },
+                            min_score: { type: "number", default: 0.55 }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "summarize_playtest_feedback",
+                    description: "Summarize recent playtest feedback counts by severity and highlight common tags.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            limit: { type: "number", default: 200 },
+                            since: { type: "string", description: "ISO timestamp to filter feedback newer than this" }
+                        }
+                    }
+                },
+                {
+                    name: "get_server_metadata",
+                    description: "Overview of server capabilities, version, and connected services for Claude configuration.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                {
+                    name: "list_qdrant_collections",
+                    description: "Return Qdrant collection metadata including purpose, vector size, and primary agents.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {}
+                    }
+                },
+                {
+                    name: "get_mcp_documentation",
+                    description: "Fetch integration documentation so Claude can self-onboard to this MCP server.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            section: { type: "string", description: "Optional heading to extract (e.g., 'Tool Catalog')." }
+                        }
+                    }
+                }
+            ]
+        }));
+
+        // Handle tool calls
+        this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+            const { name, arguments: args } = request.params;
+
+            const tool = this.tools.get(name);
+            if (!tool) {
+                throw new Error(`Unknown tool: ${name}`);
+            }
+
+            try {
+                const result = await tool(args);
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify(result, null, 2)
+                        }
+                    ]
+                };
+            } catch (error) {
+                const err = error instanceof Error ? error : new Error(String(error));
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: JSON.stringify({
+                                error: err.message,
+                                tool: name
+                            })
+                        }
+                    ],
+                    isError: true
+                };
+            }
+        });
+    }
+
+    async start() {
+        const port = Number(process.env.PORT || 3000);
+        this.transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            enableJsonResponse: true
+        });
+
+        await this.server.connect(this.transport);
+
+        const app = express();
+        app.use(express.json({ limit: "4mb" }));
+
+        const routerPath = process.env.MCP_PATH || "/mcp";
+
+        const postHandler = async (req: Request, res: Response, next: NextFunction) => {
+            try {
+                await this.transport!.handleRequest(req, res, req.body);
+            } catch (error) {
+                next(error);
+            }
+        };
+
+        const genericHandler = async (req: Request, res: Response, next: NextFunction) => {
+            try {
+                await this.transport!.handleRequest(req, res);
+            } catch (error) {
+                next(error);
+            }
+        };
+
+        app.post(routerPath, postHandler);
+        app.get(routerPath, genericHandler);
+        app.delete(routerPath, genericHandler);
+
+        app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+            const error = err instanceof Error ? err : new Error(String(err));
+            if (!res.headersSent) {
+                res.status(500).json({
+                    jsonrpc: "2.0",
+                    error: {
+                        code: -32603,
+                        message: error.message
+                    },
+                    id: null
+                });
+            }
+        });
+
+        app.use((req, res) => {
+            res.status(404).json({
+                jsonrpc: "2.0",
+                error: {
+                    code: -32004,
+                    message: `Route ${req.method} ${req.path} not found`
+                },
+                id: null
+            });
+        });
+
+        await new Promise<void>((resolve, reject) => {
+            this.httpServer = app.listen(port, () => {
+                console.error(`Game Dev MCP Server listening on http://0.0.0.0:${port}${routerPath}`);
+                resolve();
+            });
+            this.httpServer.on("error", reject);
+        });
+    }
+}
