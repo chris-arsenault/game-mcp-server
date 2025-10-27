@@ -92,14 +92,14 @@ Expected JSON schema:
 }`;
 
         try {
-            logger.info(`OpenAI enrichment request for ${entity.id}`);
+            logger.info(`OpenAI enrichment request for ${entity.id}: ${userPrompt}`);
             const response = await this.openai.chat.completions.create({
                 model: this.model,
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
                 ],
-                max_completion_tokens: 500,
+                max_completion_tokens: 1000,
                 response_format: { type: 'json_object' }
             });
 
