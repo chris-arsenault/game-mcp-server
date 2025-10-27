@@ -113,3 +113,12 @@ curl -sS -X PUT "${QDRANT_URL}/collections/code_graph" \
   }'
 
 echo "Collections created successfully"
+# Handoff collection
+curl -sS -X PUT "${QDRANT_URL}/collections/handoff_notes"   -H 'Content-Type: application/json'   -d '{
+    "vectors": {
+      "size": 768,
+      "distance": "Cosine"
+    },
+    "on_disk_payload": true
+  }'
+

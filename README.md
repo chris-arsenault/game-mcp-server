@@ -106,6 +106,7 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 - `docs/mcp/usage.md` covers Claude integration and the full MCP tool catalog exposed by the server.
 - Bug-fix memory lives in the `bug_fix_patterns` collection and is accessible via the `record_bug_fix`, `match_bug_fix`, and `get_bug_fix` tools. Error messages can be stored alongside fixes so agents can perform exact log-line lookups before falling back to semantic matches.
 - Knowledge-graph embeddings live in the `code_graph` collection. Use `explore_graph_entity` to pull the Neo4j node plus surrounding relationships, and `search_graph_semantic` for vector search against the graph-builder output.
+- `GET /stats` returns per-boot tool usage counters (`writes`/`reads`) for MCP endpoints.
 
 Use `list_qdrant_collections` and `get_mcp_documentation` to programmatically discover server capabilities from clients.
 
@@ -145,7 +146,7 @@ curl -s -X POST http://localhost:5346/build \
   -H 'Content-Type: application/json' \
   -d '{
     "mode": "full",
-    "stage": "enrich",
+    "stage": "populate",
     "branch": "integrate-kb-agents"
   }'
 ```

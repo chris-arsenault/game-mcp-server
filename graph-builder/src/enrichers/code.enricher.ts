@@ -103,6 +103,7 @@ Expected JSON schema:
                 max_completion_tokens: 1000,
                 response_format: { type: 'json_object' }
             });
+            logger.info(`Got Response`);
 
             const rawContent = response.choices[0]?.message?.content;
             const text = this.normaliseContent(rawContent);

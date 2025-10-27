@@ -24,6 +24,7 @@ import { FeedbackTool } from "./tools/feedback.tool.js";
 import { MetadataTool } from "./tools/metadata.tool.js";
 import { BugFixTool } from "./tools/bugfix.tool.js";
 import { GraphTool } from "./tools/graph.tool.js";
+import { HandoffTool } from "./tools/handoff.tool.js";
 
 export class GameDevMCPServer {
     private server: Server;
@@ -35,6 +36,47 @@ export class GameDevMCPServer {
     private httpServer?: HttpServer;
     private transport?: StreamableHTTPServerTransport;
     private sseSessions: Map<string, SSEServerTransport>;
+    private toolStats: Map<string, { writes: number; reads: number }>;
+    private readonly writeTools = new Set<string>([
+        "cache_research",
+        "store_pattern",
+        "store_architecture_decision",
+        "store_narrative_element",
+        "store_lore_entry",
+        "store_dialogue_scene",
+        "store_test_strategy",
+        "record_playtest_feedback",
+        "record_bug_fix",
+        "store_handoff"
+    ]);
+    private readonly readTools = new Set<string>([
+        "query_research",
+        "check_research_exists",
+        "find_similar_patterns",
+        "get_pattern_by_name",
+        "query_architecture",
+        "get_architecture_history",
+        "validate_against_patterns",
+        "check_consistency",
+        "search_narrative_elements",
+        "get_narrative_outline",
+        "search_lore",
+        "list_lore",
+        "find_dialogue",
+        "get_dialogue_scene",
+        "query_test_strategies",
+        "list_test_strategies_by_focus",
+        "query_playtest_feedback",
+        "summarize_playtest_feedback",
+        "match_bug_fix",
+        "get_bug_fix",
+        "get_server_metadata",
+        "list_qdrant_collections",
+        "get_mcp_documentation",
+        "explore_graph_entity",
+        "search_graph_semantic",
+        "fetch_handoff"
+    ]);
 
     constructor() {
         this.server = new Server(
@@ -63,6 +105,7 @@ export class GameDevMCPServer {
         );
         this.cache = new CacheService();
         this.sseSessions = new Map();
+        this.toolStats = new Map();
 
         // Initialize tools
         this.tools = new Map();
@@ -116,11 +159,14 @@ export class GameDevMCPServer {
             this.embedding,
             process.env.GRAPH_COLLECTION || "code_graph"
         );
+        const handoffTool = new HandoffTool(this.qdrant, this.embedding);
 
         // Register research tools
         this.tools.set("cache_research", researchTool.cacheResearch.bind(researchTool));
         this.tools.set("query_research", researchTool.queryResearch.bind(researchTool));
+
         this.tools.set("check_research_exists", researchTool.checkExists.bind(researchTool));
+
 
         // Register pattern tools
         this.tools.set("store_pattern", patternTool.storePattern.bind(patternTool));
@@ -165,11 +211,86 @@ export class GameDevMCPServer {
         this.tools.set("get_bug_fix", bugFixTool.getBugFix.bind(bugFixTool));
         this.tools.set("explore_graph_entity", graphTool.exploreGraph.bind(graphTool));
         this.tools.set("search_graph_semantic", graphTool.searchGraph.bind(graphTool));
+        this.tools.set("store_handoff", handoffTool.storeHandoff.bind(handoffTool));
+        this.tools.set("fetch_handoff", handoffTool.fetchHandoff.bind(handoffTool));
 
         // Register metadata/discovery tools
         this.tools.set("get_server_metadata", metadataTool.getServerMetadata.bind(metadataTool));
         this.tools.set("list_qdrant_collections", metadataTool.listCollections.bind(metadataTool));
         this.tools.set("get_mcp_documentation", metadataTool.getDocumentation.bind(metadataTool));
+    }
+
+    private incrementToolStat(tool: string, type: 'writes' | 'reads') {
+        const record = this.toolStats.get(tool) || { writes: 0, reads: 0 };
+        record[type] = record[type] + 1;
+        this.toolStats.set(tool, record);
+    }
+
+    private wasSuccessfulWrite(result: unknown): boolean {
+        if (!result || typeof result !== 'object') {
+            return false;
+        }
+        const obj = result as Record<string, unknown>;
+        if ('updated' in obj && typeof obj.updated === 'boolean') {
+            return obj.updated;
+        }
+        if ('success' in obj && obj.success === false) {
+            return false;
+        }
+        if ('id' in obj && obj.id) {
+            return true;
+        }
+        if ('ids' in obj && Array.isArray(obj.ids) && obj.ids.length > 0) {
+            return true;
+        }
+        if ('success' in obj && obj.success === true) {
+            return true;
+        }
+        return false;
+    }
+
+    private hasReadableContent(result: unknown): boolean {
+        if (!result) {
+            return false;
+        }
+        if (Array.isArray(result)) {
+            return result.length > 0;
+        }
+        if (typeof result === 'object') {
+            const obj = result as Record<string, unknown>;
+            if ('isError' in obj && obj.isError) {
+                return false;
+            }
+            if ('count' in obj && typeof obj.count === 'number') {
+                return obj.count > 0;
+            }
+            if ('results' in obj && Array.isArray(obj.results)) {
+                return obj.results.length > 0;
+            }
+            if ('matches' in obj && Array.isArray(obj.matches)) {
+                return obj.matches.length > 0;
+            }
+            if ('found' in obj && typeof obj.found === 'boolean') {
+                return obj.found;
+            }
+            if ('entity' in obj) {
+                return true;
+            }
+            if ('content' in obj && typeof obj.content === 'string') {
+                return obj.content.trim().length > 0;
+            }
+            if ('message' in obj && typeof obj.message === 'string') {
+                return obj.message.trim().length > 0;
+            }
+            const keys = Object.keys(obj);
+            if (keys.length > 0) {
+                const meaningful = keys.some((key) => !['success', 'cached', 'count', 'results', 'matches', 'found', 'updated'].includes(key));
+                if (meaningful) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private setupHandlers() {
@@ -188,6 +309,28 @@ export class GameDevMCPServer {
                             tags: { type: "array", items: { type: "string" }, description: "Categorization tags" }
                         },
                         required: ["topic", "findings"]
+                    }
+                },
+                {
+                    name: "store_handoff",
+                    description: "Store the end-of-session handoff notes in markdown for future agents.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            content: { type: "string", description: "Markdown content describing the current state." },
+                            updated_by: { type: "string", description: "Agent identifier." },
+                            tags: { type: "array", items: { type: "string" }, description: "Optional tags." }
+                        },
+                        required: ["content"]
+                    }
+                },
+                {
+                    name: "fetch_handoff",
+                    description: "Retrieve the most recent handoff notes at the start of a session.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {},
+                        additionalProperties: false
                     }
                 },
                 {
@@ -644,6 +787,12 @@ export class GameDevMCPServer {
 
             try {
                 const result = await tool(args);
+                if (this.writeTools.has(name) && this.wasSuccessfulWrite(result)) {
+                    this.incrementToolStat(name, 'writes');
+                }
+                if (this.readTools.has(name) && this.hasReadableContent(result)) {
+                    this.incrementToolStat(name, 'reads');
+                }
                 return {
                     content: [
                         {
@@ -756,6 +905,18 @@ export class GameDevMCPServer {
         app.get(routerPath, genericHandler);
         app.delete(routerPath, genericHandler);
 
+        app.get("/stats", (_req, res) => {
+            const stats = Array.from(this.toolStats.entries()).map(([tool, counts]) => ({
+                tool,
+                writes: counts.writes,
+                reads: counts.reads
+            }));
+
+            res.json({
+                stats
+            });
+        });
+
         app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
             const error = err instanceof Error ? err : new Error(String(err));
             if (!res.headersSent) {
@@ -790,3 +951,4 @@ export class GameDevMCPServer {
         });
     }
 }
+

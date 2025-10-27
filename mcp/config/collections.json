@@ -5,70 +5,118 @@
       "description": "Research reports, mechanic studies, and genre mashup references.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["research-engine", "research-features", "architect"]
+      "primaryAgents": [
+        "research-engine",
+        "research-features",
+        "architect"
+      ]
     },
     {
       "name": "architectural_patterns",
       "description": "Architecture decisions, system designs, and technical rationale.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["architect", "engine-dev"]
+      "primaryAgents": [
+        "architect",
+        "engine-dev"
+      ]
     },
     {
       "name": "code_implementations",
       "description": "Code patterns, reference implementations, and reusable gameplay systems.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["engine-dev", "gameplay-dev"]
+      "primaryAgents": [
+        "engine-dev",
+        "gameplay-dev"
+      ]
     },
     {
       "name": "narrative_design",
       "description": "Acts, quests, characters, and thematic story beats for narrative teams.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["narrative-writer", "narrative-dialog", "narrative-world-building"]
+      "primaryAgents": [
+        "narrative-writer",
+        "narrative-dialog",
+        "narrative-world-building"
+      ]
     },
     {
       "name": "world_building",
       "description": "Lore bibles, factions, locations, and cultural references.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["narrative-world-building", "documenter"]
+      "primaryAgents": [
+        "narrative-world-building",
+        "documenter"
+      ]
     },
     {
       "name": "dialogue_snippets",
       "description": "Dialogue scenes, branching conversations, and tone references.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["narrative-dialog", "narrative-writer"]
+      "primaryAgents": [
+        "narrative-dialog",
+        "narrative-writer"
+      ]
     },
     {
       "name": "test_strategies",
       "description": "Test strategies and coverage plans for systems and narrative branches.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["test-engineer", "playtester"]
+      "primaryAgents": [
+        "test-engineer",
+        "playtester"
+      ]
     },
     {
       "name": "gameplay_feedback",
       "description": "Playtest feedback, qualitative reports, and player sentiment summaries.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["playtester", "optimizer", "gameplay-dev"]
+      "primaryAgents": [
+        "playtester",
+        "optimizer",
+        "gameplay-dev"
+      ]
     },
     {
       "name": "bug_fix_patterns",
       "description": "Canonical bug fixes paired with the incorrect code patterns they replace.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["engine-dev", "test-engineer", "optimizer"]
+      "primaryAgents": [
+        "engine-dev",
+        "test-engineer",
+        "optimizer"
+      ]
     },
     {
       "name": "code_graph",
       "description": "Embeddings produced by the graph builder for code, documentation, and architectural entities.",
       "dimension": 768,
       "distance": "Cosine",
-      "primaryAgents": ["engine-dev", "architect", "research-engine", "test-engineer"]
+      "primaryAgents": [
+        "engine-dev",
+        "architect",
+        "research-engine",
+        "test-engineer"
+      ]
+    },
+    {
+      "name": "handoff_notes",
+      "description": "Single markdown handoff document passed between sessions.",
+      "dimension": 768,
+      "distance": "Cosine",
+      "primaryAgents": [
+        "engine-dev",
+        "architect",
+        "research-engine",
+        "test-engineer"
+      ]
     }
   ]
 }

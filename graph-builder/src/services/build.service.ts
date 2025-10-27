@@ -35,13 +35,13 @@ export class BuildService {
             const repoUrl = request.repoUrl ?? appConfig.repository.url;
             const branch = request.branch ?? appConfig.repository.branch;
 
-            logger.info(
-                `Preparing repository (${repoUrl} @ ${branch}) at ${buildConfig.repoPath}`
-            );
-            await syncRepository(buildConfig.repoPath, repoUrl, branch);
-            logger.info("Repository ready");
-
             const stageFilter = request.stage ?? "all";
+
+            if (stageFilter === "all" || stageFilter === "parse") {
+                logger.info(`Preparing repository (${repoUrl} @ ${branch}) at ${buildConfig.repoPath}`);
+                await syncRepository(buildConfig.repoPath, repoUrl, branch);
+                logger.info("Repository ready");
+            }
 
             if (stageFilter === "all" || stageFilter === "parse") {
                 const parseStage = new ParseStage();

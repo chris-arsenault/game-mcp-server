@@ -109,13 +109,15 @@ export class JavaScriptParser {
                         content: this.extractSnippet(content, astPath.node.start, astPath.node.end),
                         metadata: {
                             methods,
-                            properties
+                            properties,
+                            startLine: astPath.node.loc?.start.line || 0,
+                            endLine: astPath.node.loc?.end.line || 0
                         },
                         sourceLocation: {
                             file: relativePath,
                             line: astPath.node.loc?.start.line || 0,
                             column: astPath.node.loc?.start.column || 0
-                        }
+                        },
                     };
                     entities.push(classEntity);
 
@@ -156,7 +158,9 @@ export class JavaScriptParser {
                         content: this.extractSnippet(content, astPath.node.start, astPath.node.end),
                         metadata: {
                             params,
-                            async: astPath.node.async
+                            async: astPath.node.async,
+                            startLine: astPath.node.loc?.start.line || 0,
+                            endLine: astPath.node.loc?.end.line || 0
                         },
                         sourceLocation: {
                             file: relativePath,
