@@ -10,6 +10,17 @@ const projectRoot = path.resolve(__dirname, "../..");
 const collectionsPath = path.join(projectRoot, "config", "collections.json");
 const documentationPath = path.join(projectRoot, "docs", "mcp", "usage.md");
 
+async function readFileSafe(filePath: string): Promise<string | null> {
+    try {
+        return await readFile(filePath, 'utf-8');
+    } catch (error: any) {
+        if (error && error.code === 'ENOENT') {
+            return null;
+        }
+        throw error;
+    }
+}
+
 export class MetadataTool {
     constructor(private cache: CacheService) {}
 
@@ -42,7 +53,17 @@ export class MetadataTool {
             };
         }
 
-        const raw = await readFile(collectionsPath, "utf-8");
+        const raw = await readFileSafe(collectionsPath);
+        if (!raw) {
+            const payload = {
+                source: "missing",
+                message: "collections.json not found",
+                collections: []
+            };
+            this.cache.set(cacheKey, payload, 5 * 60 * 1000);
+            return payload;
+        }
+
         const parsed = JSON.parse(raw);
 
         const payload = {
@@ -63,7 +84,16 @@ export class MetadataTool {
             return cached;
         }
 
-        const doc = await readFile(documentationPath, "utf-8");
+        const doc = await readFileSafe(documentationPath);
+        if (!doc) {
+            const result = {
+                section: section ?? "all",
+                content: "Documentation file not found at docs/mcp/usage.md"
+            };
+            this.cache.set(cacheKey, result, 5 * 60 * 1000);
+            return result;
+        }
+
         let content = doc;
 
         if (section) {
