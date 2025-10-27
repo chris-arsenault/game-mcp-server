@@ -37,6 +37,8 @@ export class GameDevMCPServer {
     private transport?: StreamableHTTPServerTransport;
     private sseSessions: Map<string, SSEServerTransport>;
     private toolStats: Map<string, { writes: number; reads: number }>;
+    private hasActiveSession = false;
+    private currentSessionId?: string;
     private readonly writeTools = new Set<string>([
         "cache_research",
         "store_pattern",
@@ -291,6 +293,82 @@ export class GameDevMCPServer {
             }
         }
         return false;
+    }
+
+    private buildTransport(): StreamableHTTPServerTransport {
+        return new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            enableJsonResponse: true,
+            onsessioninitialized: (sessionId) => {
+                this.hasActiveSession = true;
+                this.currentSessionId = sessionId ?? undefined;
+                console.info(
+                    "[MCP] Streamable HTTP session initialized",
+                    { sessionId: this.currentSessionId }
+                );
+            },
+            onsessionclosed: (sessionId) => {
+                console.info("[MCP] Streamable HTTP session closed", { sessionId });
+                this.hasActiveSession = false;
+                this.currentSessionId = undefined;
+            }
+        });
+    }
+
+    private async initializeTransport() {
+        const newTransport = this.buildTransport();
+        await this.server.connect(newTransport);
+        this.transport = newTransport;
+        this.hasActiveSession = false;
+        this.currentSessionId = undefined;
+    }
+
+    private async resetTransport() {
+        console.warn("[MCP] Resetting Streamable HTTP transport for new session", {
+            previousSessionId: this.currentSessionId
+        });
+        await this.closeAllSseSessions();
+        if (this.transport) {
+            try {
+                await this.transport.close();
+            } catch (error) {
+                console.error("[MCP] Error closing previous transport", {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+        }
+        await this.initializeTransport();
+    }
+
+    private async closeAllSseSessions() {
+        if (this.sseSessions.size === 0) {
+            return;
+        }
+        const sessions = Array.from(this.sseSessions.values());
+        this.sseSessions.clear();
+        for (const session of sessions) {
+            try {
+                await session.close();
+            } catch (error) {
+                console.warn("[MCP] Failed to close SSE session", {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+        }
+    }
+
+    private isInitializationRequest(body: unknown): boolean {
+        if (!body) {
+            return false;
+        }
+        const messages = Array.isArray(body) ? body : [body];
+        return messages.some((message) => {
+            if (!message || typeof message !== "object") {
+                return false;
+            }
+            const rpc = message as Record<string, unknown>;
+            return rpc.jsonrpc === "2.0" && rpc.method === "initialize";
+        });
     }
 
     private setupHandlers() {
@@ -821,12 +899,7 @@ export class GameDevMCPServer {
 
     async start() {
         const port = Number(process.env.PORT || 3000);
-        this.transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            enableJsonResponse: true
-        });
-
-        await this.server.connect(this.transport);
+        await this.initializeTransport();
 
         const app = express();
         app.use(express.json({ limit: "4mb" }));
@@ -835,6 +908,9 @@ export class GameDevMCPServer {
 
         const postHandler = async (req: Request, res: Response, next: NextFunction) => {
             try {
+                if (this.isInitializationRequest(req.body) && this.hasActiveSession) {
+                    await this.resetTransport();
+                }
                 await this.transport!.handleRequest(req, res, req.body);
             } catch (error) {
                 next(error);
@@ -851,6 +927,91 @@ export class GameDevMCPServer {
 
         app.get("/sse", async (req, res, next) => {
             try {
+                const configuredBase =
+                    process.env.MCP_PUBLIC_BASE_URL?.replace(/\/$/, "") ??
+                    process.env.PUBLIC_MCP_BASE_URL?.replace(/\/$/, "");
+                const forwardedProto = req.header("x-forwarded-proto");
+                const forwardedHost = req.header("x-forwarded-host");
+                const hostHeader = forwardedHost ?? req.header("host");
+                const protocolHeader =
+                    forwardedProto ?? (req.secure ? "https" : req.protocol ?? "http");
+                const baseUrl = (configuredBase ||
+                    (hostHeader ? `${protocolHeader}://${hostHeader}` : undefined))?.replace(/\/$/, "");
+
+                if (baseUrl) {
+                    const originalWrite = res.write.bind(res) as typeof res.write;
+                    const patchedWrite: typeof res.write = function (
+                        chunk: any,
+                        encoding?: BufferEncoding | ((error?: Error | null) => void),
+                        callback?: (error?: Error | null) => void
+                    ): boolean {
+                        let enc = encoding;
+                        let cb = callback;
+
+                        if (typeof enc === "function") {
+                            cb = enc;
+                            enc = undefined;
+                        }
+
+                        const normalizedEncoding = typeof enc === "string" ? enc : undefined;
+                        const decodeEncoding = (normalizedEncoding ?? "utf8") as BufferEncoding;
+                        const writeThrough = (chunkToWrite: any): boolean => {
+                            const args: unknown[] = [chunkToWrite];
+                            if (normalizedEncoding) {
+                                args.push(normalizedEncoding);
+                            }
+                            if (cb) {
+                                if (!normalizedEncoding) {
+                                    args.push(undefined);
+                                }
+                                args.push(cb);
+                            }
+                            return (originalWrite as (...applyArgs: any[]) => boolean).apply(
+                                res,
+                                args
+                            );
+                        };
+
+                        if (typeof chunk === "string" || Buffer.isBuffer(chunk)) {
+                            const chunkString =
+                                typeof chunk === "string"
+                                    ? chunk
+                                    : chunk.toString(decodeEncoding);
+
+                            if (chunkString.startsWith("event: endpoint")) {
+                                const lines = chunkString.split("\n");
+                                const dataIndex = lines.findIndex(line => line.startsWith("data: "));
+
+                                if (dataIndex !== -1) {
+                                    const relative = lines[dataIndex].slice("data: ".length).trim();
+                                    try {
+                                        const absolute = new URL(relative, baseUrl).toString();
+                                        lines[dataIndex] = `data: ${absolute}`;
+                                        const patched = lines.join("\n");
+                                        chunk =
+                                            typeof chunk === "string"
+                                                ? patched
+                                                : Buffer.from(patched, decodeEncoding);
+                                    } catch (error) {
+                                        console.warn("Failed to construct absolute SSE endpoint URL", {
+                                            baseUrl,
+                                            relative,
+                                            error: error instanceof Error ? error.message : String(error)
+                                        });
+                                    }
+                                }
+
+                                res.write = originalWrite;
+                                return writeThrough(chunk);
+                            }
+                        }
+
+                        return writeThrough(chunk);
+                    };
+
+                    res.write = patchedWrite;
+                }
+
                 const transport = new SSEServerTransport("/messages", res);
                 transport.onclose = () => {
                     this.sseSessions.delete(transport.sessionId);
@@ -951,4 +1112,3 @@ export class GameDevMCPServer {
         });
     }
 }
-
