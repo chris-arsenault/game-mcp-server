@@ -9,7 +9,8 @@ type StoreArgs = {
 
 export class HandoffTool {
     private collection = "handoff_notes";
-    private handoffId = "handoff";
+    // Use a deterministic UUID so Qdrant accepts the ID format across versions.
+    private handoffId = "11111111-1111-1111-1111-111111111111";
 
     constructor(
         private qdrant: QdrantService,
