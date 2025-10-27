@@ -122,7 +122,6 @@ Set the following environment variables so the server can reach the graph-builde
 | `GRAPH_BUILDER_PORT` | `4100` | HTTP port for the graph-builder service |
 | `OPENAI_API_KEY` | _(required)_ | Used by the graph builder to enrich entities |
 | `OPENAI_MODEL` | `gpt-5` | Override the OpenAI model for semantic enrichment |
-| `OPENAI_TEMPERATURE` | `0` | Optional temperature tweak for enrichment responses |
 | `REPO_URL` | `https://github.com/chris-arsenault/genai-game-engine.git` | Default repository cloned by the builder |
 | `REPO_BRANCH` | `main` | Default branch synced before each build |
 

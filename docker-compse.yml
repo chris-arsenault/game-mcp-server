@@ -79,7 +79,6 @@ services:
       - EMBEDDING_URL=http://embedding-service:80
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=gpt-5
-      - OPENAI_TEMPERATURE=0
       - LOG_LEVEL=info
     volumes:
       - /mnt/apps/apps/mcp-server/graph-repo:/repo

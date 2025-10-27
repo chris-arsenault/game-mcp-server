@@ -8,7 +8,6 @@ export class CodeEnricher {
     private openai?: OpenAI;
     private embeddingUrl: string;
     private model: string;
-    private temperature: number;
 
     constructor() {
         if (!config.openai.apiKey) {
@@ -23,9 +22,6 @@ export class CodeEnricher {
 
         this.embeddingUrl = config.embedding.url;
         this.model = config.openai.model;
-        this.temperature = Number.isFinite(config.openai.temperature)
-            ? config.openai.temperature
-            : 0;
     }
 
     async enrichEntity(entity: ParsedEntity): Promise<EnrichedEntity> {
@@ -98,7 +94,6 @@ Expected JSON schema:
         try {
             const response = await this.openai.chat.completions.create({
                 model: this.model,
-                temperature: this.temperature,
                 messages: [
                     { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt }
