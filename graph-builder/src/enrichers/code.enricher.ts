@@ -92,7 +92,7 @@ Expected JSON schema:
 }`;
 
         try {
-            const preview = userPrompt.length > 400 ? `${userPrompt.slice(0, 400)}...` : userPrompt;
+            const preview = userPrompt? "Has Content" : "Empty Content";
             logger.info(`OpenAI enrichment request for ${entity.id}: ${preview}`);
             const response = await this.openai.chat.completions.create({
                 model: this.model,
