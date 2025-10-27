@@ -92,6 +92,7 @@ Expected JSON schema:
 }`;
 
         try {
+            logger.info(`OpenAI enrichment request for ${entity.id}`);
             const response = await this.openai.chat.completions.create({
                 model: this.model,
                 messages: [
@@ -104,6 +105,7 @@ Expected JSON schema:
 
             const rawContent = response.choices[0]?.message?.content;
             const text = this.normaliseContent(rawContent);
+            logger.debug(`OpenAI raw response for ${entity.id}: ${text}`);
 
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
