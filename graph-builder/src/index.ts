@@ -4,6 +4,7 @@ import { logger } from "./utils/logger.js";
 import { config } from "./utils/config.js";
 import { resetStaging } from "./utils/reset.js";
 import { BuildRequest } from "./types/index.js";
+import { waitForDependencies } from "./utils/startup.js";
 
 const app = express();
 const buildService = new BuildService();
@@ -96,6 +97,13 @@ app.use(
 
 const port = config.server.port;
 
-app.listen(port, () => {
-    logger.info(`Knowledge graph builder API listening on port ${port}`);
-});
+waitForDependencies()
+    .then(() => {
+        app.listen(port, () => {
+            logger.info(`Knowledge graph builder API listening on port ${port}`);
+        });
+    })
+    .catch((error) => {
+        logger.error("Failed to start graph builder API:", error);
+        process.exit(1);
+    });

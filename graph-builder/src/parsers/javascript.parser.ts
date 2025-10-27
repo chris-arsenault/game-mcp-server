@@ -40,7 +40,9 @@ export class JavaScriptParser {
 
             const ast = parse(content, {
                 sourceType: 'module',
-                plugins: ['jsx', 'typescript']
+                plugins: ['jsx', 'typescript'],
+                ranges: true,
+                tokens: false
             });
 
             type TraverseFunction = (node: t.Node, opts?: TraverseOptions) => void;
@@ -104,6 +106,7 @@ export class JavaScriptParser {
                         type: 'class',
                         name: className,
                         path: relativePath,
+                        content: this.extractSnippet(content, astPath.node.start, astPath.node.end),
                         metadata: {
                             methods,
                             properties
@@ -150,6 +153,7 @@ export class JavaScriptParser {
                         type: 'function',
                         name: funcName,
                         path: relativePath,
+                        content: this.extractSnippet(content, astPath.node.start, astPath.node.end),
                         metadata: {
                             params,
                             async: astPath.node.async
@@ -232,5 +236,18 @@ export class JavaScriptParser {
             logger.error(`Error parsing ${filePath}:`, error);
             return { entities, relationships };
         }
+    }
+
+    private extractSnippet(source: string, start?: number | null, end?: number | null): string {
+        if (typeof start !== 'number' || typeof end !== 'number' || start >= end) {
+            return '';
+        }
+
+        const raw = source.slice(start, end);
+        const trimmed = raw.trim();
+        if (trimmed.length <= 800) {
+            return trimmed;
+        }
+        return trimmed.slice(0, 800) + '\n...';
     }
 }
