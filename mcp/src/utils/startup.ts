@@ -8,7 +8,7 @@ interface DependencyConfig {
     check: () => Promise<void>;
 }
 
-async function waitForDependency(dep: DependencyConfig, retries = 30, delayMs = 2000) {
+async function waitForDependency(dep: DependencyConfig, retries = 30, delayMs = 10000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
             await dep.check();

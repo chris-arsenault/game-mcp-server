@@ -145,7 +145,7 @@ curl -s -X POST http://localhost:5346/build \
   -H 'Content-Type: application/json' \
   -d '{
     "mode": "full",
-    "stage": "enrich",
+    "stage": "parse",
     "branch": "integrate-kb-agents"
   }'
 ```
