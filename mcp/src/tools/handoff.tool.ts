@@ -9,7 +9,7 @@ type StoreArgs = {
 
 export class HandoffTool {
     private collection = "handoff_notes";
-    private handoffId = "handoff";
+    private handoffId = 123;
 
     constructor(
         private qdrant: QdrantService,
