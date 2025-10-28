@@ -1110,11 +1110,13 @@ export class GameDevMCPServer {
 
         const postHandler = async (req: Request, res: Response, next: NextFunction) => {
             try {
-                if (this.hasActiveSession) {
+                const isInitialization = this.isInitializationRequest(req.body);
+
+                if (isInitialization) {
+                    await this.resetTransport();
+                } else if (this.hasActiveSession) {
                     const sessionHeader = this.getSessionHeaderFromRequest(req);
-                    const isInitRequest = this.isInitializationRequest(req.body);
-                    const shouldReset = isInitRequest || !sessionHeader;
-                    if (shouldReset) {
+                    if (!sessionHeader) {
                         await this.resetTransport();
                     }
                 }
