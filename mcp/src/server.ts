@@ -6,7 +6,7 @@ import {
     ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import express, { Request, Response, NextFunction } from "express";
-import { Server as HttpServer } from "http";
+import { Server as HttpServer, IncomingMessage, ServerResponse } from "http";
 import { randomUUID } from "crypto";
 import { QdrantService } from "./services/qdrant.service.js";
 import { EmbeddingService } from "./services/embedding.service.js";
@@ -296,7 +296,7 @@ export class GameDevMCPServer {
     }
 
     private buildTransport(): StreamableHTTPServerTransport {
-        return new StreamableHTTPServerTransport({
+        const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             enableJsonResponse: true,
             onsessioninitialized: (sessionId) => {
@@ -313,6 +313,7 @@ export class GameDevMCPServer {
                 this.currentSessionId = undefined;
             }
         });
+        return transport;
     }
 
     private async initializeTransport() {
@@ -369,6 +370,207 @@ export class GameDevMCPServer {
             const rpc = message as Record<string, unknown>;
             return rpc.jsonrpc === "2.0" && rpc.method === "initialize";
         });
+    }
+
+    private getConfiguredBaseUrl(): string | undefined {
+        return (
+            process.env.MCP_PUBLIC_BASE_URL?.replace(/\/$/, "") ??
+            process.env.PUBLIC_MCP_BASE_URL?.replace(/\/$/, "")
+        );
+    }
+
+    private normalizeHeaderValue(value: string | string[] | undefined): string | undefined {
+        if (!value) {
+            return undefined;
+        }
+        return Array.isArray(value) ? value[0] : value;
+    }
+
+    private getPublicBaseUrl(req?: IncomingMessage): string | undefined {
+        const configured = this.getConfiguredBaseUrl();
+        if (configured) {
+            return configured;
+        }
+        if (!req) {
+            return undefined;
+        }
+        const headers = req.headers ?? {};
+        const forwardedProto = this.normalizeHeaderValue(headers["x-forwarded-proto"] as string | string[] | undefined);
+        const forwardedHost = this.normalizeHeaderValue(headers["x-forwarded-host"] as string | string[] | undefined);
+        const hostHeader = forwardedHost ?? this.normalizeHeaderValue(headers.host as string | string[] | undefined);
+        if (!hostHeader) {
+            return undefined;
+        }
+        const proto = forwardedProto ?? ((req.socket as any)?.encrypted ? "https" : "http");
+        return `${proto}://${hostHeader}`.replace(/\/$/, "");
+    }
+
+    private getSessionHeaderFromRequest(req: Request): string | undefined {
+        const raw = req.headers["mcp-session-id"];
+        if (typeof raw === "string") {
+            return raw;
+        }
+        if (Array.isArray(raw) && raw.length > 0) {
+            return raw[0];
+        }
+        const headerMethod = (req as Request).header?.bind(req);
+        const headerValue = headerMethod ? headerMethod("Mcp-Session-Id") : undefined;
+        return headerValue ?? undefined;
+    }
+
+    private absolutizeRelativePath(path: string, baseUrl?: string): string {
+        if (!baseUrl) {
+            return path;
+        }
+        if (!path.startsWith("/")) {
+            return path;
+        }
+        if (!path.startsWith("/messages")) {
+            return path;
+        }
+        try {
+            const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+            return new URL(path, normalizedBase).toString();
+        } catch (_error) {
+            return path;
+        }
+    }
+
+    private absolutizeMessageEndpoints<T>(value: T, baseUrl: string): T {
+        const self = this;
+        const transform = (input: unknown): unknown => {
+            if (typeof input === "string") {
+                return self.absolutizeRelativePath(input, baseUrl);
+            }
+            if (Array.isArray(input)) {
+                let changed = false;
+                const result = input.map((item) => {
+                    const next = transform(item);
+                    if (next !== item) {
+                        changed = true;
+                    }
+                    return next;
+                });
+                return changed ? result : input;
+            }
+            if (input && typeof input === "object") {
+                let changed = false;
+                const record = input as Record<string, unknown>;
+                const result: Record<string, unknown> = {};
+                for (const [key, original] of Object.entries(record)) {
+                    const next = transform(original);
+                    result[key] = next;
+                    if (next !== original) {
+                        changed = true;
+                    }
+                }
+                return changed ? result : input;
+            }
+            return input;
+        };
+        return transform(value) as T;
+    }
+
+    private patchSseResponse(res: Response | ServerResponse, baseUrl: string) {
+        const marker = Symbol.for("mcp-sse-patched");
+        if ((res as any)[marker]) {
+            return;
+        }
+        (res as any)[marker] = true;
+
+        const originalWrite = res.write.bind(res) as typeof res.write;
+        const self = this;
+        const patchedWrite = (function (
+            chunk: any,
+            encoding?: BufferEncoding | ((error?: Error | null) => void),
+            callback?: (error?: Error | null) => void
+        ): boolean {
+            let enc = encoding;
+            let cb = callback;
+
+            if (typeof enc === "function") {
+                cb = enc;
+                enc = undefined;
+            }
+
+            const normalizedEncoding = typeof enc === "string" ? enc : undefined;
+            const decodeEncoding = (normalizedEncoding ?? "utf8") as BufferEncoding;
+
+            const writeThrough = (chunkToWrite: any): boolean => {
+                const args: unknown[] = [chunkToWrite];
+                if (normalizedEncoding) {
+                    args.push(normalizedEncoding);
+                }
+                if (cb) {
+                    if (!normalizedEncoding) {
+                        args.push(undefined);
+                    }
+                    args.push(cb);
+                }
+                return (originalWrite as (...applyArgs: any[]) => boolean).apply(res, args);
+            };
+
+            if (typeof chunk === "string" || Buffer.isBuffer(chunk)) {
+                let text = typeof chunk === "string" ? chunk : chunk.toString(decodeEncoding);
+                const originalText = text;
+
+                if (text.startsWith("event: endpoint")) {
+                    const lines = text.split("\n");
+                    const dataIndex = lines.findIndex(line => line.startsWith("data: "));
+                    if (dataIndex !== -1) {
+                        const relative = lines[dataIndex].slice("data: ".length).trim();
+                        const absolute = self.absolutizeRelativePath(relative, baseUrl);
+                        lines[dataIndex] = `data: ${absolute}`;
+                        text = lines.join("\n");
+                    }
+                }
+
+                if (text.includes("data:")) {
+                    const lines = text.split("\n");
+                    let changed = false;
+                    for (let i = 0; i < lines.length; i++) {
+                        if (!lines[i].startsWith("data: ")) {
+                            continue;
+                        }
+                        const payload = lines[i].slice("data: ".length);
+                        const trimmed = payload.trim();
+                        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                            try {
+                                const parsed = JSON.parse(trimmed);
+                                const rewritten = self.absolutizeMessageEndpoints(parsed, baseUrl);
+                                if (rewritten !== parsed) {
+                                    lines[i] = `data: ${JSON.stringify(rewritten)}`;
+                                    changed = true;
+                                }
+                            } catch (_error) {
+                                const absolute = self.absolutizeRelativePath(trimmed, baseUrl);
+                                if (absolute !== trimmed) {
+                                    lines[i] = `data: ${absolute}`;
+                                    changed = true;
+                                }
+                            }
+                        } else {
+                            const absolute = self.absolutizeRelativePath(trimmed, baseUrl);
+                            if (absolute !== trimmed) {
+                                lines[i] = `data: ${absolute}`;
+                                changed = true;
+                            }
+                        }
+                    }
+                    if (changed) {
+                        text = lines.join("\n");
+                    }
+                }
+
+                if (text !== originalText) {
+                    chunk = typeof chunk === "string" ? text : Buffer.from(text, decodeEncoding);
+                }
+            }
+
+            return writeThrough(chunk);
+        }).bind(this) as typeof res.write;
+
+        res.write = patchedWrite;
     }
 
     private setupHandlers() {
@@ -908,8 +1110,17 @@ export class GameDevMCPServer {
 
         const postHandler = async (req: Request, res: Response, next: NextFunction) => {
             try {
-                if (this.isInitializationRequest(req.body) && this.hasActiveSession) {
-                    await this.resetTransport();
+                if (this.hasActiveSession) {
+                    const sessionHeader = this.getSessionHeaderFromRequest(req);
+                    const isInitRequest = this.isInitializationRequest(req.body);
+                    const shouldReset = isInitRequest || !sessionHeader;
+                    if (shouldReset) {
+                        await this.resetTransport();
+                    }
+                }
+                const baseUrl = this.getPublicBaseUrl(req);
+                if (baseUrl) {
+                    this.patchSseResponse(res, baseUrl);
                 }
                 await this.transport!.handleRequest(req, res, req.body);
             } catch (error) {
@@ -919,6 +1130,10 @@ export class GameDevMCPServer {
 
         const genericHandler = async (req: Request, res: Response, next: NextFunction) => {
             try {
+                const baseUrl = this.getPublicBaseUrl(req);
+                if (baseUrl) {
+                    this.patchSseResponse(res, baseUrl);
+                }
                 await this.transport!.handleRequest(req, res);
             } catch (error) {
                 next(error);
@@ -927,89 +1142,10 @@ export class GameDevMCPServer {
 
         app.get("/sse", async (req, res, next) => {
             try {
-                const configuredBase =
-                    process.env.MCP_PUBLIC_BASE_URL?.replace(/\/$/, "") ??
-                    process.env.PUBLIC_MCP_BASE_URL?.replace(/\/$/, "");
-                const forwardedProto = req.header("x-forwarded-proto");
-                const forwardedHost = req.header("x-forwarded-host");
-                const hostHeader = forwardedHost ?? req.header("host");
-                const protocolHeader =
-                    forwardedProto ?? (req.secure ? "https" : req.protocol ?? "http");
-                const baseUrl = (configuredBase ||
-                    (hostHeader ? `${protocolHeader}://${hostHeader}` : undefined))?.replace(/\/$/, "");
+                const baseUrl = this.getPublicBaseUrl(req);
 
                 if (baseUrl) {
-                    const originalWrite = res.write.bind(res) as typeof res.write;
-                    const patchedWrite: typeof res.write = function (
-                        chunk: any,
-                        encoding?: BufferEncoding | ((error?: Error | null) => void),
-                        callback?: (error?: Error | null) => void
-                    ): boolean {
-                        let enc = encoding;
-                        let cb = callback;
-
-                        if (typeof enc === "function") {
-                            cb = enc;
-                            enc = undefined;
-                        }
-
-                        const normalizedEncoding = typeof enc === "string" ? enc : undefined;
-                        const decodeEncoding = (normalizedEncoding ?? "utf8") as BufferEncoding;
-                        const writeThrough = (chunkToWrite: any): boolean => {
-                            const args: unknown[] = [chunkToWrite];
-                            if (normalizedEncoding) {
-                                args.push(normalizedEncoding);
-                            }
-                            if (cb) {
-                                if (!normalizedEncoding) {
-                                    args.push(undefined);
-                                }
-                                args.push(cb);
-                            }
-                            return (originalWrite as (...applyArgs: any[]) => boolean).apply(
-                                res,
-                                args
-                            );
-                        };
-
-                        if (typeof chunk === "string" || Buffer.isBuffer(chunk)) {
-                            const chunkString =
-                                typeof chunk === "string"
-                                    ? chunk
-                                    : chunk.toString(decodeEncoding);
-
-                            if (chunkString.startsWith("event: endpoint")) {
-                                const lines = chunkString.split("\n");
-                                const dataIndex = lines.findIndex(line => line.startsWith("data: "));
-
-                                if (dataIndex !== -1) {
-                                    const relative = lines[dataIndex].slice("data: ".length).trim();
-                                    try {
-                                        const absolute = new URL(relative, baseUrl).toString();
-                                        lines[dataIndex] = `data: ${absolute}`;
-                                        const patched = lines.join("\n");
-                                        chunk =
-                                            typeof chunk === "string"
-                                                ? patched
-                                                : Buffer.from(patched, decodeEncoding);
-                                    } catch (error) {
-                                        console.warn("Failed to construct absolute SSE endpoint URL", {
-                                            baseUrl,
-                                            relative,
-                                            error: error instanceof Error ? error.message : String(error)
-                                        });
-                                    }
-                                }
-
-                                res.write = originalWrite;
-                                return writeThrough(chunk);
-                            }
-                        }
-
-                        return writeThrough(chunk);
-                    };
-
-                    res.write = patchedWrite;
+                    this.patchSseResponse(res, baseUrl);
                 }
 
                 const transport = new SSEServerTransport("/messages", res);
