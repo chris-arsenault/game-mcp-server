@@ -117,6 +117,18 @@
         "research-engine",
         "test-engineer"
       ]
+    },
+    {
+      "name": "backlog_items",
+      "description": "Persistent store for product backlog items with metadata, tags, and semantic embeddings.",
+      "dimension": 768,
+      "distance": "Cosine",
+      "primaryAgents": [
+        "engine-dev",
+        "architect",
+        "producer",
+        "qa-lead"
+      ]
     }
   ]
 }

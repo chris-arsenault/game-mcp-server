@@ -38,6 +38,11 @@ This Model Context Protocol (MCP) server centralizes game development knowledge 
 | `query_test_strategies` | Semantic search across stored QA strategies. |
 | `record_bug_fix` | Store a vetted fix pattern with anti-pattern examples and error fingerprints. |
 | `record_playtest_feedback` | Persist playtest feedback (positives/negatives/suggestions) into `gameplay_feedback`. |
+| `create_backlog_item` | Create a new backlog item capturing description, priority, status, tags, and planning metadata. |
+| `update_backlog_item` | Update fields on an existing backlog item without overwriting unspecified data. |
+| `search_backlog_by_tag` | Filter backlog items by tags/status/priority/owner without semantic matching. |
+| `search_backlog_semantic` | Semantic search across backlog items with optional structured filters. |
+| `get_top_backlog_items` | Fetch the highest-priority unfinished backlog items (defaults to top five). |
 | `search_graph_semantic` | Perform Qdrant vector search against knowledge-graph embeddings (`code_graph`). |
 | `search_lore` | Semantic search across lore entries, optionally filtering by category/region/tags. |
 | `search_narrative_elements` | Semantic search over narrative beats, acts, and character elements. |

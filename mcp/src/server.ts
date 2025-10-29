@@ -25,6 +25,7 @@ import { MetadataTool } from "./tools/metadata.tool.js";
 import { BugFixTool } from "./tools/bugfix.tool.js";
 import { GraphTool } from "./tools/graph.tool.js";
 import { HandoffTool } from "./tools/handoff.tool.js";
+import { BacklogTool } from "./tools/backlog.tool.js";
 
 export class GameDevMCPServer {
     private server: Server;
@@ -49,7 +50,9 @@ export class GameDevMCPServer {
         "store_test_strategy",
         "record_playtest_feedback",
         "record_bug_fix",
-        "store_handoff"
+        "store_handoff",
+        "create_backlog_item",
+        "update_backlog_item"
     ]);
     private readonly readTools = new Set<string>([
         "query_research",
@@ -77,7 +80,10 @@ export class GameDevMCPServer {
         "get_mcp_documentation",
         "explore_graph_entity",
         "search_graph_semantic",
-        "fetch_handoff"
+        "fetch_handoff",
+        "search_backlog_by_tag",
+        "search_backlog_semantic",
+        "get_top_backlog_items"
     ]);
 
     constructor() {
@@ -162,6 +168,7 @@ export class GameDevMCPServer {
             process.env.GRAPH_COLLECTION || "code_graph"
         );
         const handoffTool = new HandoffTool(this.qdrant, this.embedding);
+        const backlogTool = new BacklogTool(this.qdrant, this.embedding);
 
         // Register research tools
         this.tools.set("cache_research", researchTool.cacheResearch.bind(researchTool));
@@ -215,6 +222,11 @@ export class GameDevMCPServer {
         this.tools.set("search_graph_semantic", graphTool.searchGraph.bind(graphTool));
         this.tools.set("store_handoff", handoffTool.storeHandoff.bind(handoffTool));
         this.tools.set("fetch_handoff", handoffTool.fetchHandoff.bind(handoffTool));
+        this.tools.set("create_backlog_item", backlogTool.createBacklogItem.bind(backlogTool));
+        this.tools.set("update_backlog_item", backlogTool.updateBacklogItem.bind(backlogTool));
+        this.tools.set("search_backlog_by_tag", backlogTool.searchBacklogByTag.bind(backlogTool));
+        this.tools.set("search_backlog_semantic", backlogTool.searchBacklogSemantics.bind(backlogTool));
+        this.tools.set("get_top_backlog_items", backlogTool.getTopBacklogItems.bind(backlogTool));
 
         // Register metadata/discovery tools
         this.tools.set("get_server_metadata", metadataTool.getServerMetadata.bind(metadataTool));
@@ -611,6 +623,99 @@ export class GameDevMCPServer {
                         type: "object",
                         properties: {},
                         additionalProperties: false
+                    }
+                },
+                {
+                    name: "create_backlog_item",
+                    description: "Create a new product backlog item with full agile metadata for prioritisation.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            title: { type: "string", description: "Concise title for the backlog item." },
+                            description: { type: "string", description: "Detailed problem or user story statement." },
+                            status: { type: "string", description: "Workflow status (e.g., 'todo', 'in-progress', 'blocked', 'done')." },
+                            priority: { type: "string", description: "Priority bucket (e.g., 'P0', 'P1', 'P2', 'P3')." },
+                            next_steps: { type: "array", items: { type: "string" }, description: "Immediate actions required to progress the item." },
+                            completed_work: { type: "array", items: { type: "string" }, description: "Deliverables already finished for this item." },
+                            tags: { type: "array", items: { type: "string" }, description: "Searchable labels such as 'rendering', 'multiplayer'." },
+                            owner: { type: "string", description: "Primary assignee or DRI for the backlog item." },
+                            due_date: { type: "string", description: "Optional ISO8601 due date for time-bound items." },
+                            sprint: { type: "string", description: "Iteration or milestone identifier (e.g., 'Sprint 14')." },
+                            story_points: { type: "number", description: "Relative sizing value for planning poker / velocity tracking." },
+                            acceptance_criteria: { type: "array", items: { type: "string" }, description: "Testable acceptance criteria or success conditions." },
+                            dependencies: { type: "array", items: { type: "string" }, description: "Related item IDs or external blockers." },
+                            notes: { type: "string", description: "Freeform notes, research links, or context." },
+                            category: { type: "string", description: "Optional thematic grouping (e.g., 'tech-debt', 'narrative', 'systems')." }
+                        },
+                        required: ["title", "description", "status", "priority"]
+                    }
+                },
+                {
+                    name: "update_backlog_item",
+                    description: "Update fields on an existing backlog item by ID while preserving untouched data.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            id: { type: "string", description: "Existing backlog item identifier returned from creation." },
+                            title: { type: "string" },
+                            description: { type: "string" },
+                            status: { type: "string" },
+                            priority: { type: "string" },
+                            next_steps: { type: "array", items: { type: "string" } },
+                            completed_work: { type: "array", items: { type: "string" } },
+                            tags: { type: "array", items: { type: "string" } },
+                            owner: { type: "string" },
+                            due_date: { type: "string" },
+                            sprint: { type: "string" },
+                            story_points: { type: "number" },
+                            acceptance_criteria: { type: "array", items: { type: "string" } },
+                            dependencies: { type: "array", items: { type: "string" } },
+                            notes: { type: "string" },
+                            category: { type: "string" }
+                        },
+                        required: ["id"]
+                    }
+                },
+                {
+                    name: "search_backlog_by_tag",
+                    description: "Filter backlog items by labels, status, priority, or owner without semantic search.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            tags: { type: "array", items: { type: "string" }, description: "One or more tags to match (logical ANY)." },
+                            status: { type: "string", description: "Optional workflow status filter." },
+                            priority: { type: "string", description: "Optional priority filter." },
+                            owner: { type: "string", description: "Optional owner / DRI filter." },
+                            limit: { type: "number", description: "Maximum results to return (default 25)." }
+                        }
+                    }
+                },
+                {
+                    name: "search_backlog_semantic",
+                    description: "Semantic search across backlog items using embeddings with optional structured filters.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            query: { type: "string", description: "Natural language description of the item you need." },
+                            tags: { type: "array", items: { type: "string" }, description: "Optional tags to narrow the scope." },
+                            status: { type: "string", description: "Optional status restriction." },
+                            priority: { type: "string", description: "Optional priority filter." },
+                            owner: { type: "string", description: "Optional owner filter." },
+                            limit: { type: "number", description: "Maximum results to return (default 10)." },
+                            min_score: { type: "number", description: "Similarity threshold between 0-1 (default 0.55)." }
+                        },
+                        required: ["query"]
+                    }
+                },
+                {
+                    name: "get_top_backlog_items",
+                    description: "Return the highest-priority unfinished backlog items (defaults to top 5).",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            limit: { type: "number", description: "Maximum number of items to return (default 5, max 20)." },
+                            includeCompleted: { type: "boolean", description: "Set true to include completed items in the ranking." }
+                        }
                     }
                 },
                 {

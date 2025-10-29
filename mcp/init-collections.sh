@@ -112,7 +112,6 @@ curl -sS -X PUT "${QDRANT_URL}/collections/code_graph" \
     "on_disk_payload": true
   }'
 
-echo "Collections created successfully"
 # Handoff collection
 curl -sS -X PUT "${QDRANT_URL}/collections/handoff_notes"   -H 'Content-Type: application/json'   -d '{
     "vectors": {
@@ -122,3 +121,13 @@ curl -sS -X PUT "${QDRANT_URL}/collections/handoff_notes"   -H 'Content-Type: ap
     "on_disk_payload": true
   }'
 
+# Backlog collection
+curl -sS -X PUT "${QDRANT_URL}/collections/backlog_items"   -H 'Content-Type: application/json'   -d '{
+    "vectors": {
+      "size": 768,
+      "distance": "Cosine"
+    },
+    "on_disk_payload": true
+  }'
+
+echo "Collections created successfully"
