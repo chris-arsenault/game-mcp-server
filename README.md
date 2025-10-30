@@ -2,6 +2,14 @@
 
 MCP (Model Context Protocol) server that backs the **genai-game-engine** project with research, architecture, narrative, QA, and playtest knowledge stored in Qdrant. The server exposes the Streamable HTTP MCP transport on port `3000` by default, so Claude or any MCP-compatible client can connect over HTTP or curl.
 
+## Projects in this repo
+
+| Directory | Purpose |
+| --- | --- |
+| `mcp/` | Streamable HTTP MCP server with rich tool catalog for research, architecture, QA, lore, etc. |
+| `graph-builder/` | Pipelines that populate the knowledge-graph collections used by `explore_graph_entity` and `search_graph_semantic`. |
+| `backlog-editor/` | Visual kanban + handoff editor that talks directly to Qdrant, offering a browser UI for PBIs and session handoff notes. |
+
 ## Prerequisites
 
 - Node.js 18+

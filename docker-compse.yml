@@ -92,6 +92,25 @@ services:
     networks:
       - mcp-network
 
+  backlog-editor:
+    build: /mnt/apps/apps/mcp-server/game-mcp-server/backlog-editor
+    container_name: backlog-editor
+    ports:
+      - "5365:4005"
+    environment:
+      - PORT=4005
+      - QDRANT_URL=http://qdrant:6333
+      - EMBEDDING_URL=http://embedding-service:80
+      - BACKLOG_COLLECTION=backlog_items
+      - HANDOFF_COLLECTION=handoff_notes
+      - HANDOFF_ID=11111111-1111-1111-1111-111111111111
+    depends_on:
+      - qdrant
+      - embedding-service
+    restart: unless-stopped
+    networks:
+      - mcp-network
+
 networks:
   mcp-network:
     driver: bridge
