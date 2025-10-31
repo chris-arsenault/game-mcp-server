@@ -521,7 +521,11 @@ function mapGraphSearchResult(result: any): GraphSearchResult {
   const labels = Array.isArray(labelsRaw)
     ? labelsRaw.map((label: unknown) => String(label))
     : [String(labelsRaw)].filter(Boolean);
-  const id = normalizeId(result?.id) ?? normalizeId(payload.id) ?? randomUUID();
+  const id =
+    normalizeId(payload.entityId) ??
+    normalizeId(payload.id) ??
+    normalizeId(result?.id) ??
+    randomUUID();
   const title = String(
     payload.name ?? payload.title ?? payload.display ?? payload.id ?? id
   );
