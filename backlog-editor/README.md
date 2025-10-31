@@ -8,6 +8,7 @@ A lightweight visual editor for the project backlog and handoff notes. It expose
 - **Create new PBIs** with default status/priority.
 - **Top items endpoint** to fetch the highest‑priority unfinished work.
 - **Handoff loop** with a simple textarea to fetch and overwrite the shared handoff document.
+- **Graph explorer** to inspect Neo4j nodes/relationships with force-directed visualization plus semantic search over the `code_graph` Qdrant collection.
 - **REST API** (`/api/...`) suitable for automation or integration with other tools.
 
 ## Prerequisites
@@ -34,6 +35,12 @@ Environment variables (optional):
 | `BACKLOG_COLLECTION` | `backlog_items` | Qdrant collection name for backlog PBIs. |
 | `HANDOFF_COLLECTION` | `handoff_notes` | Qdrant collection name for the shared handoff document. |
 | `HANDOFF_ID` | `11111111-1111-1111-1111-111111111111` | Point identifier used for the handoff note. |
+| `GRAPH_COLLECTION` | `code_graph` | Qdrant collection containing graph-builder embeddings. |
+| `NEO4J_HTTP_URL` | `http://localhost:7474` | Base URL for Neo4j HTTP API. |
+| `NEO4J_DATABASE` | `neo4j` | Database name for Neo4j queries. |
+| `NEO4J_USER` | `neo4j` | Neo4j username. |
+| `NEO4J_PASSWORD` | `password` | Neo4j password. |
+| `GRAPH_MAX_DEPTH` | `3` | Maximum allowed hop depth when expanding neighborhoods. |
 
 Create a `.env` file in `backlog-editor/` or export variables before running the app.
 
@@ -68,6 +75,8 @@ After `npm run build`, static assets land in `dist/client` and server bundle in 
 - `GET /api/backlog/top?limit=5&includeCompleted=false` – Highest priority PBIs.
 - `POST /api/backlog` – Create a new item (`{ title, description, status?, priority? }`).
 - `PUT /api/backlog/:id` – Update an existing item (status/priority/description, etc.).
+- `GET /api/graph/search?query=...` – Semantic search over graph-builder embeddings (returns candidate node IDs).
+- `GET /api/graph/entity?id=...&depth=1` – Fetch a node plus its neighborhood up to the requested depth with nodes and relationships ready for visualization.
 
 The React client uses these routes via relative `/api/...` requests, so the proxy works automatically in dev/production.
 
@@ -75,10 +84,10 @@ The React client uses these routes via relative `/api/...` requests, so the prox
 
 ```
 backlog-editor/
-├── index.html          # Vite entry
-├── package.json        # Scripts & dependencies
-├── server/             # Express API + Qdrant/embedding helpers
-└── src/                # React application (kanban UI, handoff editor)
+├── index.html           # Vite entry
+├── package.json         # Scripts & dependencies
+├── server/              # Express API + Qdrant/embedding + Neo4j REST helpers
+└── src/                 # React application (pages for backlog + graph explorer)
 ```
 
 Feel free to adapt styling, add route guards, or expand the API as the backlog evolves.

@@ -4,6 +4,7 @@ import cors from "cors";
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import axios from "axios";
 
 import { QdrantService } from "./services/qdrant.service.js";
 import { EmbeddingService } from "./services/embedding.service.js";
@@ -19,6 +20,14 @@ const BACKLOG_COLLECTION = process.env.BACKLOG_COLLECTION ?? "backlog_items";
 const HANDOFF_COLLECTION = process.env.HANDOFF_COLLECTION ?? "handoff_notes";
 const HANDOFF_ID =
   process.env.HANDOFF_ID ?? "11111111-1111-1111-1111-111111111111";
+const GRAPH_COLLECTION = process.env.GRAPH_COLLECTION ?? "code_graph";
+const NEO4J_HTTP_URL = process.env.NEO4J_HTTP_URL ?? "http://localhost:7474";
+const NEO4J_DATABASE = process.env.NEO4J_DATABASE ?? "neo4j";
+const NEO4J_USER = process.env.NEO4J_USER ?? "neo4j";
+const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD ?? "password";
+const NEO4J_ENDPOINT = `${NEO4J_HTTP_URL.replace(/\/$/, "")}/db/${NEO4J_DATABASE}/tx/commit`;
+const NEO4J_AUTH_HEADER = "Basic " + Buffer.from(`${NEO4J_USER}:${NEO4J_PASSWORD}`).toString("base64");
+const GRAPH_MAX_DEPTH = Math.max(1, Number(process.env.GRAPH_MAX_DEPTH ?? 3));
 
 const qdrant = new QdrantService(QDRANT_URL);
 const embedding = new EmbeddingService(EMBEDDING_URL);
@@ -48,6 +57,34 @@ type HandoffResult = {
   content: string;
   updated_by: string | null;
   updated_at: string | null;
+};
+
+type GraphNode = {
+  id: string;
+  labels: string[];
+  properties: Record<string, unknown>;
+};
+
+type GraphRelationship = {
+  id: string;
+  type: string;
+  start: string;
+  end: string;
+  properties: Record<string, unknown>;
+};
+
+type GraphEntityPayload = {
+  center: GraphNode | null;
+  nodes: GraphNode[];
+  relationships: GraphRelationship[];
+};
+
+type GraphSearchResult = {
+  id: string;
+  title: string;
+  score: number;
+  labels: string[];
+  properties: Record<string, unknown>;
 };
 
 app.get("/api/handoff", async (_req, res) => {
@@ -244,6 +281,93 @@ app.put("/api/backlog/:id", async (req, res) => {
   }
 });
 
+app.get("/api/graph/search", async (req, res) => {
+  const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+  const limitParam = Number(req.query.limit ?? 12);
+  const limit = Math.min(Math.max(isNaN(limitParam) ? 12 : limitParam, 1), 25);
+
+  if (!query) {
+    return res.status(400).json({ error: "query is required" });
+  }
+
+  try {
+    const vector = await embedding.embed(query);
+    const results = await qdrant.search(GRAPH_COLLECTION, vector, limit, undefined, undefined);
+    const mapped = (results ?? []).map(mapGraphSearchResult);
+    res.json({ data: mapped });
+  } catch (error) {
+    console.error("Failed to search graph collection:", error);
+    res.status(500).json({ error: "Failed to search graph data" });
+  }
+});
+
+app.get("/api/graph/entity", async (req, res) => {
+  const identifier = typeof req.query.id === "string" ? req.query.id.trim() : "";
+  const depthParam = Number(req.query.depth ?? 1);
+  const depth = Math.min(Math.max(isNaN(depthParam) ? 1 : depthParam, 1), GRAPH_MAX_DEPTH);
+
+  if (!identifier) {
+    return res.status(400).json({ error: "id is required" });
+  }
+
+  const statement = `
+    MATCH (center)
+    WHERE center.id = $id OR elementId(center) = $id OR toString(id(center)) = $id
+    WITH center
+    OPTIONAL MATCH path = (center)-[rels*1..$depth]-(neighbor)
+    UNWIND CASE WHEN rels IS NULL THEN [NULL] ELSE rels END AS rel
+    WITH center, neighbor, rel
+    RETURN center,
+           collect(DISTINCT neighbor) AS neighbors,
+           collect(DISTINCT rel) AS relationships
+  `;
+
+  try {
+    const rows = await runCypher(statement, { id: identifier, depth });
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Graph entity not found" });
+    }
+
+    const row = rows[0]?.row ?? [];
+    const centerRaw = row[0] ?? null;
+    const neighborsRaw = Array.isArray(row[1]) ? row[1] : [];
+    const relationshipsRaw = Array.isArray(row[2]) ? row[2] : [];
+
+    const center = centerRaw ? mapGraphNode(centerRaw) : null;
+    if (!center) {
+      return res.status(404).json({ error: "Graph entity not found" });
+    }
+    const nodeMap = new Map<string, GraphNode>();
+    if (center) {
+      nodeMap.set(center.id, center);
+    }
+
+    for (const neighbor of neighborsRaw) {
+      const mapped = mapGraphNode(neighbor);
+      if (mapped) {
+        nodeMap.set(mapped.id, mapped);
+      }
+    }
+
+    const relationships = relationshipsRaw
+      .map(mapGraphRelationship)
+      .filter((rel): rel is GraphRelationship => Boolean(rel) && nodeMap.has(rel!.start) && nodeMap.has(rel!.end));
+
+    const nodes = Array.from(nodeMap.values());
+
+    const payload: GraphEntityPayload = {
+      center,
+      nodes,
+      relationships
+    };
+
+    res.json({ data: payload });
+  } catch (error) {
+    console.error("Failed to fetch graph entity:", error);
+    res.status(500).json({ error: "Failed to fetch graph entity" });
+  }
+});
+
 const distDir = path.resolve(process.cwd(), "dist/client");
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));
@@ -319,6 +443,109 @@ function priorityRank(priority: string) {
     return 3;
   }
   return 4;
+}
+
+async function runCypher(statement: string, parameters: Record<string, unknown>) {
+  const response = await axios.post(
+    NEO4J_ENDPOINT,
+    {
+      statements: [
+        {
+          statement,
+          parameters
+        }
+      ]
+    },
+    {
+      headers: {
+        Authorization: NEO4J_AUTH_HEADER,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  const body = response.data as {
+    results: Array<{ data: Array<{ row: any[] }> }>;
+    errors: Array<{ message: string }>;
+  };
+
+  if (body.errors && body.errors.length > 0) {
+    throw new Error(body.errors[0]?.message ?? "Neo4j query failed");
+  }
+
+  return body.results?.[0]?.data ?? [];
+}
+
+function mapGraphNode(node: any): GraphNode | null {
+  if (!node) return null;
+  const properties = node.properties ?? {};
+  const labels = Array.isArray(node.labels) ? node.labels : [];
+  const id =
+    normalizeId(node.elementId) ??
+    normalizeId(node.id) ??
+    normalizeId(node.identity) ??
+    (properties.id ? String(properties.id) : undefined);
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    labels,
+    properties
+  };
+}
+
+function mapGraphRelationship(rel: any): GraphRelationship | null {
+  if (!rel) return null;
+  const id = normalizeId(rel.elementId) ?? normalizeId(rel.id) ?? randomUUID();
+  const start = normalizeId(rel.start) ?? normalizeId(rel.startNode) ?? normalizeId(rel.startNodeElementId);
+  const end = normalizeId(rel.end) ?? normalizeId(rel.endNode) ?? normalizeId(rel.endNodeElementId);
+  if (!start || !end) {
+    return null;
+  }
+
+  return {
+    id,
+    type: rel.type ?? "RELATED",
+    start,
+    end,
+    properties: rel.properties ?? {}
+  };
+}
+
+function mapGraphSearchResult(result: any): GraphSearchResult {
+  const payload = result?.payload ?? {};
+  const labelsRaw = payload.labels ?? payload.label ?? [];
+  const labels = Array.isArray(labelsRaw)
+    ? labelsRaw.map((label: unknown) => String(label))
+    : [String(labelsRaw)].filter(Boolean);
+  const id = normalizeId(result?.id) ?? normalizeId(payload.id) ?? randomUUID();
+  const title = String(
+    payload.name ?? payload.title ?? payload.display ?? payload.id ?? id
+  );
+
+  return {
+    id,
+    title,
+    score: typeof result?.score === "number" ? result.score : 0,
+    labels,
+    properties: payload
+  };
+}
+
+function normalizeId(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  if (value && typeof value === "object" && "low" in value && typeof (value as any).low === "number") {
+    return String((value as any).low);
+  }
+  return undefined;
 }
 
 async function embedBacklog(item: Pick<BacklogItem, "title" | "description" | "status" | "priority" | "next_steps" | "completed_work" | "acceptance_criteria" | "dependencies" | "notes" | "tags" | "owner" | "category" | "sprint">) {

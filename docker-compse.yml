@@ -104,9 +104,16 @@ services:
       - BACKLOG_COLLECTION=backlog_items
       - HANDOFF_COLLECTION=handoff_notes
       - HANDOFF_ID=11111111-1111-1111-1111-111111111111
+      - GRAPH_COLLECTION=code_graph
+      - NEO4J_HTTP_URL=http://neo4j:7474
+      - NEO4J_DATABASE=neo4j
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=your-secure-password
+      - GRAPH_MAX_DEPTH=3
     depends_on:
       - qdrant
       - embedding-service
+      - neo4j
     restart: unless-stopped
     networks:
       - mcp-network

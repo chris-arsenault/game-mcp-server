@@ -9,6 +9,7 @@ MCP (Model Context Protocol) server that backs the **genai-game-engine** project
 | `mcp/` | Streamable HTTP MCP server with rich tool catalog for research, architecture, QA, lore, etc. |
 | `graph-builder/` | Pipelines that populate the knowledge-graph collections used by `explore_graph_entity` and `search_graph_semantic`. |
 | `backlog-editor/` | Visual kanban + handoff editor that talks directly to Qdrant, offering a browser UI for PBIs and session handoff notes. |
+| `generate-image/` | Standalone STDIO MCP server that proxies OpenAI image generation and saves outputs to disk. |
 
 ## Prerequisites
 
