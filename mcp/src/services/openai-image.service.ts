@@ -1,4 +1,16 @@
-import axios, { AxiosInstance } from "axios";
+import OpenAI from "openai";
+
+type ImageBackground = "auto" | "transparent" | "opaque";
+type ImageQuality = "standard" | "hd" | "low" | "medium" | "high" | "auto";
+type ImageSize =
+    | "auto"
+    | "1024x1024"
+    | "1536x1024"
+    | "1024x1536"
+    | "256x256"
+    | "512x512"
+    | "1792x1024"
+    | "1024x1792";
 
 export type GenerateImageParams = {
     prompt: string;
@@ -15,11 +27,11 @@ export type GeneratedImage = {
 };
 
 export class OpenAIImageService {
-    private client: AxiosInstance;
+    private client: OpenAI;
     private defaultModel: string;
-    private defaultSize: string;
-    private defaultQuality: string;
-    private defaultBackground: string;
+    private defaultSize: ImageSize;
+    private defaultQuality: ImageQuality;
+    private defaultBackground: ImageBackground;
 
     constructor(apiKey: string, options?: {
         baseURL?: string;
@@ -32,67 +44,108 @@ export class OpenAIImageService {
             throw new Error("OPENAI_API_KEY is required for image generation");
         }
 
-        this.client = axios.create({
-            baseURL: options?.baseURL ?? "https://api.openai.com/v1",
-            headers: {
-                Authorization: `Bearer ${apiKey}`,
-                "Content-Type": "application/json"
-            },
-            timeout: 60_000
+        this.client = new OpenAI({
+            apiKey,
+            baseURL: options?.baseURL
         });
 
         this.defaultModel = options?.defaultModel ?? "gpt-image-1";
-        this.defaultSize = options?.defaultSize ?? "1024x1024";
-        this.defaultQuality = options?.defaultQuality ?? "standard";
-        this.defaultBackground = options?.defaultBackground ?? "auto";
+        this.defaultSize = this.parseSize(options?.defaultSize) ?? "1024x1024";
+        this.defaultQuality = this.parseQuality(options?.defaultQuality) ?? "auto";
+        this.defaultBackground = this.parseBackground(options?.defaultBackground) ?? "auto";
     }
 
     async generate(params: GenerateImageParams): Promise<GeneratedImage[]> {
+        const background = this.parseBackground(params.background) ?? this.defaultBackground;
+        const size = this.parseSize(params.size) ?? this.defaultSize;
+        const quality = this.parseQuality(params.quality) ?? this.defaultQuality;
         const payload = {
             prompt: params.prompt,
             model: params.model ?? this.defaultModel,
-            size: params.size ?? this.defaultSize,
-            quality: params.quality ?? this.defaultQuality,
-            background: params.background ?? this.defaultBackground
+            size,
+            quality,
+            background
         };
 
         try {
-            const response = await this.client.post("/images/generations", payload);
-            const data = response.data;
-            if (!data || !Array.isArray(data.data)) {
+            const response = await this.client.images.generate(payload);
+            if (!response || !Array.isArray(response.data)) {
                 console.error("[OpenAIImageService] Unexpected response structure", {
                     payload: this.safePayload(payload),
-                    response: data
+                    response
                 });
                 throw new Error("Unexpected response from OpenAI image API");
             }
 
-            return data.data.map((item: any) => ({
+            return response.data.map((item: any) => ({
                 url: item.url,
                 b64_json: item.b64_json,
                 revised_prompt: item.revised_prompt
             }));
         } catch (error) {
-            if (axios.isAxiosError(error)) {
-                const status = error.response?.status;
-                const statusText = error.response?.statusText;
-                const responseData = error.response?.data;
-                console.error("[OpenAIImageService] Image generation request failed", {
-                    status,
-                    statusText,
-                    response: responseData,
-                    payload: this.safePayload(payload)
-                });
-                throw new Error(
-                    `OpenAI image generation failed: ${status ?? ""} ${statusText ?? error.message}`
-                );
-            }
-
+            const err = error as { status?: number; message?: string; error?: unknown };
             console.error("[OpenAIImageService] Image generation error", {
-                error: error instanceof Error ? error.message : String(error),
+                status: err?.status,
+                message: err?.message ?? (error instanceof Error ? error.message : String(error)),
+                error: err?.error,
                 payload: this.safePayload(payload)
             });
             throw error;
+        }
+    }
+
+    private parseBackground(value?: string): ImageBackground | undefined {
+        switch ((value ?? "").toLowerCase()) {
+            case "auto":
+                return "auto";
+            case "transparent":
+                return "transparent";
+            case "opaque":
+                return "opaque";
+            default:
+                return undefined;
+        }
+    }
+
+    private parseQuality(value?: string): ImageQuality | undefined {
+        switch ((value ?? "").toLowerCase()) {
+            case "standard":
+                return "standard";
+            case "hd":
+                return "hd";
+            case "low":
+                return "low";
+            case "medium":
+                return "medium";
+            case "high":
+                return "high";
+            case "auto":
+                return "auto";
+            default:
+                return undefined;
+        }
+    }
+
+    private parseSize(value?: string): ImageSize | undefined {
+        switch ((value ?? "").toLowerCase()) {
+            case "auto":
+                return "auto";
+            case "1024x1024":
+                return "1024x1024";
+            case "1536x1024":
+                return "1536x1024";
+            case "1024x1536":
+                return "1024x1536";
+            case "256x256":
+                return "256x256";
+            case "512x512":
+                return "512x512";
+            case "1792x1024":
+                return "1792x1024";
+            case "1024x1792":
+                return "1024x1792";
+            default:
+                return undefined;
         }
     }
 

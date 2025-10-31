@@ -752,7 +752,7 @@ export class GameDevMCPServer {
                             prompt: { type: "string", description: "Detailed description of the desired image." },
                             model: { type: "string", description: "OpenAI model identifier (default 'gpt-image-1')." },
                             size: { type: "string", description: "Image dimensions, e.g., '1024x1024'." },
-                            quality: { type: "string", description: "Quality preset such as 'standard' or 'hd'." },
+                            quality: { type: "string", description: "Quality preset such as 'auto' or 'low' or 'high'." },
                             background: { type: "string", enum: ["auto", "transparent", "opaque"], description: "Background behavior for generated image." }
                         },
                         required: ["prompt"],
