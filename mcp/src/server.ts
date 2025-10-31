@@ -181,7 +181,7 @@ export class GameDevMCPServer {
                 defaultModel: process.env.OPENAI_IMAGE_MODEL,
                 defaultSize: process.env.OPENAI_IMAGE_SIZE,
                 defaultQuality: process.env.OPENAI_IMAGE_QUALITY,
-                defaultStyle: process.env.OPENAI_IMAGE_STYLE,
+                defaultBackground: process.env.OPENAI_IMAGE_BACKGROUND,
                 defaultResponseFormat: (process.env.OPENAI_IMAGE_RESPONSE_FORMAT as "url" | "b64_json")
             });
             imageGenTool = new ImageGenTool(imageService);
@@ -746,7 +746,7 @@ export class GameDevMCPServer {
                 },
                 {
                     name: "generate_image",
-                    description: "Generate images via OpenAI's image API with configurable size, quality, style, and response format.",
+                    description: "Generate images via OpenAI's image API with configurable size, quality, background, and response format.",
                     inputSchema: {
                         type: "object",
                         properties: {
@@ -754,7 +754,7 @@ export class GameDevMCPServer {
                             model: { type: "string", description: "OpenAI model identifier (default 'gpt-image-1')." },
                             size: { type: "string", description: "Image dimensions, e.g., '1024x1024'." },
                             quality: { type: "string", description: "Quality preset such as 'standard' or 'hd'." },
-                            style: { type: "string", description: "Stylistic guidance, e.g., 'vivid' or 'natural'." },
+                            background: { type: "string", enum: ["auto", "transparent", "opaque"], description: "Background behavior for generated image." },
                             response_format: { type: "string", enum: ["url", "b64_json"], description: "Return hosted URLs or base64 JSON." },
                             user: { type: "string", description: "Optional end-user identifier for moderation context." },
                             n: { type: "number", description: "Number of images to generate (default 1)." }

@@ -5,7 +5,7 @@ export type GenerateImageParams = {
     model?: string;
     size?: string;
     quality?: string;
-    style?: string;
+    background?: string;
     response_format?: "url" | "b64_json";
     user?: string;
     n?: number;
@@ -22,7 +22,7 @@ export class OpenAIImageService {
     private defaultModel: string;
     private defaultSize: string;
     private defaultQuality: string;
-    private defaultStyle: string;
+    private defaultBackground: string;
     private defaultResponseFormat: "url" | "b64_json";
 
     constructor(apiKey: string, options?: {
@@ -30,7 +30,7 @@ export class OpenAIImageService {
         defaultModel?: string;
         defaultSize?: string;
         defaultQuality?: string;
-        defaultStyle?: string;
+        defaultBackground?: string;
         defaultResponseFormat?: "url" | "b64_json";
     }) {
         if (!apiKey) {
@@ -49,7 +49,7 @@ export class OpenAIImageService {
         this.defaultModel = options?.defaultModel ?? "gpt-image-1";
         this.defaultSize = options?.defaultSize ?? "1024x1024";
         this.defaultQuality = options?.defaultQuality ?? "standard";
-        this.defaultStyle = options?.defaultStyle ?? "vivid";
+        this.defaultBackground = options?.defaultBackground ?? "auto";
         this.defaultResponseFormat = options?.defaultResponseFormat ?? "url";
     }
 
@@ -59,7 +59,7 @@ export class OpenAIImageService {
             model: params.model ?? this.defaultModel,
             size: params.size ?? this.defaultSize,
             quality: params.quality ?? this.defaultQuality,
-            style: params.style ?? this.defaultStyle,
+            background: params.background ?? this.defaultBackground,
             response_format: params.response_format ?? this.defaultResponseFormat,
             user: params.user,
             n: params.n ?? 1

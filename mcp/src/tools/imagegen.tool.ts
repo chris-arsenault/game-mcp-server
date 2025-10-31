@@ -19,7 +19,7 @@ export class ImageGenTool {
             model: args.model,
             size: args.size,
             quality: args.quality,
-            style: args.style,
+            background: args.background,
             response_format: args.response_format,
             user: args.user,
             n: args.n

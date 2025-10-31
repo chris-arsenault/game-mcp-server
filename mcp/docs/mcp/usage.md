@@ -43,7 +43,7 @@ This Model Context Protocol (MCP) server centralizes game development knowledge 
 | `search_backlog_by_tag` | Filter backlog items by tags/status/priority/owner without semantic matching. |
 | `search_backlog_semantic` | Semantic search across backlog items with optional structured filters. |
 | `get_top_backlog_items` | Fetch the highest-priority unfinished backlog items (defaults to top five). |
-| `generate_image` | Produce images via OpenAI’s image generation API with custom size/quality/style settings. |
+| `generate_image` | Produce images via OpenAI’s image generation API with custom size/quality/background settings. |
 | `search_graph_semantic` | Perform Qdrant vector search against knowledge-graph embeddings (`code_graph`). |
 | `search_lore` | Semantic search across lore entries, optionally filtering by category/region/tags. |
 | `search_narrative_elements` | Semantic search over narrative beats, acts, and character elements. |
