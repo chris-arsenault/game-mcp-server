@@ -6,9 +6,6 @@ export type GenerateImageParams = {
     size?: string;
     quality?: string;
     background?: string;
-    response_format?: "url" | "b64_json";
-    user?: string;
-    n?: number;
 };
 
 export type GeneratedImage = {
@@ -23,7 +20,6 @@ export class OpenAIImageService {
     private defaultSize: string;
     private defaultQuality: string;
     private defaultBackground: string;
-    private defaultResponseFormat: "url" | "b64_json";
 
     constructor(apiKey: string, options?: {
         baseURL?: string;
@@ -31,7 +27,6 @@ export class OpenAIImageService {
         defaultSize?: string;
         defaultQuality?: string;
         defaultBackground?: string;
-        defaultResponseFormat?: "url" | "b64_json";
     }) {
         if (!apiKey) {
             throw new Error("OPENAI_API_KEY is required for image generation");
@@ -50,7 +45,6 @@ export class OpenAIImageService {
         this.defaultSize = options?.defaultSize ?? "1024x1024";
         this.defaultQuality = options?.defaultQuality ?? "standard";
         this.defaultBackground = options?.defaultBackground ?? "auto";
-        this.defaultResponseFormat = options?.defaultResponseFormat ?? "url";
     }
 
     async generate(params: GenerateImageParams): Promise<GeneratedImage[]> {
@@ -59,10 +53,7 @@ export class OpenAIImageService {
             model: params.model ?? this.defaultModel,
             size: params.size ?? this.defaultSize,
             quality: params.quality ?? this.defaultQuality,
-            background: params.background ?? this.defaultBackground,
-            response_format: params.response_format ?? this.defaultResponseFormat,
-            user: params.user,
-            n: params.n ?? 1
+            background: params.background ?? this.defaultBackground
         };
 
         try {

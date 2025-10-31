@@ -181,8 +181,7 @@ export class GameDevMCPServer {
                 defaultModel: process.env.OPENAI_IMAGE_MODEL,
                 defaultSize: process.env.OPENAI_IMAGE_SIZE,
                 defaultQuality: process.env.OPENAI_IMAGE_QUALITY,
-                defaultBackground: process.env.OPENAI_IMAGE_BACKGROUND,
-                defaultResponseFormat: (process.env.OPENAI_IMAGE_RESPONSE_FORMAT as "url" | "b64_json")
+                defaultBackground: process.env.OPENAI_IMAGE_BACKGROUND
             });
             imageGenTool = new ImageGenTool(imageService);
         } else {
@@ -754,10 +753,7 @@ export class GameDevMCPServer {
                             model: { type: "string", description: "OpenAI model identifier (default 'gpt-image-1')." },
                             size: { type: "string", description: "Image dimensions, e.g., '1024x1024'." },
                             quality: { type: "string", description: "Quality preset such as 'standard' or 'hd'." },
-                            background: { type: "string", enum: ["auto", "transparent", "opaque"], description: "Background behavior for generated image." },
-                            response_format: { type: "string", enum: ["url", "b64_json"], description: "Return hosted URLs or base64 JSON." },
-                            user: { type: "string", description: "Optional end-user identifier for moderation context." },
-                            n: { type: "number", description: "Number of images to generate (default 1)." }
+                            background: { type: "string", enum: ["auto", "transparent", "opaque"], description: "Background behavior for generated image." }
                         },
                         required: ["prompt"],
                         additionalProperties: false
