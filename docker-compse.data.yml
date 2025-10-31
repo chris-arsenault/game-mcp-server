@@ -1,0 +1,50 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - /mnt/apps/apps/mcp-server/qdrant-storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    restart: unless-stopped
+    networks:
+      - mcp-data-network
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: neo4j
+    ports:
+      - "7687:7687"
+      - "7474:7474"
+    volumes:
+      - /mnt/apps/apps/mcp-server/neo4j_data:/data
+      - /mnt/apps/apps/mcp-server/neo4j_logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/your-secure-password
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_memory_heap_max__size=2G
+    restart: unless-stopped
+    networks:
+      - mcp-data-network
+
+  embedding-service:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    container_name: embedding-service
+    ports:
+      - "5361:80"
+    environment:
+      - MODEL_ID=nomic-ai/nomic-embed-text-v1.5
+      - REVISION=main
+      - MAX_BATCH_SIZE=32
+      - MODEL_CACHE=/data
+    volumes:
+      - /mnt/apps/apps/mcp-server/embedding-cache:/data
+    restart: unless-stopped
+    networks:
+      - mcp-data-network
+
+networks:
+  mcp-data-network:
+    driver: bridge
