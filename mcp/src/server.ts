@@ -26,6 +26,8 @@ import { BugFixTool } from "./tools/bugfix.tool.js";
 import { GraphTool } from "./tools/graph.tool.js";
 import { HandoffTool } from "./tools/handoff.tool.js";
 import { BacklogTool } from "./tools/backlog.tool.js";
+import { ImageGenTool } from "./tools/imagegen.tool.js";
+import { OpenAIImageService } from "./services/openai-image.service.js";
 
 export class GameDevMCPServer {
     private server: Server;
@@ -83,7 +85,8 @@ export class GameDevMCPServer {
         "fetch_handoff",
         "search_backlog_by_tag",
         "search_backlog_semantic",
-        "get_top_backlog_items"
+        "get_top_backlog_items",
+        "generate_image"
     ]);
 
     constructor() {
@@ -170,6 +173,22 @@ export class GameDevMCPServer {
         const handoffTool = new HandoffTool(this.qdrant, this.embedding);
         const backlogTool = new BacklogTool(this.qdrant, this.embedding);
 
+        const openaiApiKey = process.env.OPENAI_API_KEY;
+        let imageGenTool: ImageGenTool | undefined;
+        if (openaiApiKey) {
+            const imageService = new OpenAIImageService(openaiApiKey, {
+                baseURL: process.env.OPENAI_BASE_URL,
+                defaultModel: process.env.OPENAI_IMAGE_MODEL,
+                defaultSize: process.env.OPENAI_IMAGE_SIZE,
+                defaultQuality: process.env.OPENAI_IMAGE_QUALITY,
+                defaultStyle: process.env.OPENAI_IMAGE_STYLE,
+                defaultResponseFormat: (process.env.OPENAI_IMAGE_RESPONSE_FORMAT as "url" | "b64_json")
+            });
+            imageGenTool = new ImageGenTool(imageService);
+        } else {
+            console.warn("[ImageGenTool] OPENAI_API_KEY not set. generate_image tool will return an error when invoked.");
+        }
+
         // Register research tools
         this.tools.set("cache_research", researchTool.cacheResearch.bind(researchTool));
         this.tools.set("query_research", researchTool.queryResearch.bind(researchTool));
@@ -227,6 +246,13 @@ export class GameDevMCPServer {
         this.tools.set("search_backlog_by_tag", backlogTool.searchBacklogByTag.bind(backlogTool));
         this.tools.set("search_backlog_semantic", backlogTool.searchBacklogSemantics.bind(backlogTool));
         this.tools.set("get_top_backlog_items", backlogTool.getTopBacklogItems.bind(backlogTool));
+        if (imageGenTool) {
+            this.tools.set("generate_image", imageGenTool.generateImage.bind(imageGenTool));
+        } else {
+            this.tools.set("generate_image", async () => {
+                throw new Error("Image generation unavailable: OPENAI_API_KEY not configured");
+            });
+        }
 
         // Register metadata/discovery tools
         this.tools.set("get_server_metadata", metadataTool.getServerMetadata.bind(metadataTool));
@@ -716,6 +742,25 @@ export class GameDevMCPServer {
                             limit: { type: "number", description: "Maximum number of items to return (default 5, max 20)." },
                             includeCompleted: { type: "boolean", description: "Set true to include completed items in the ranking." }
                         }
+                    }
+                },
+                {
+                    name: "generate_image",
+                    description: "Generate images via OpenAI's image API with configurable size, quality, style, and response format.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            prompt: { type: "string", description: "Detailed description of the desired image." },
+                            model: { type: "string", description: "OpenAI model identifier (default 'gpt-image-1')." },
+                            size: { type: "string", description: "Image dimensions, e.g., '1024x1024'." },
+                            quality: { type: "string", description: "Quality preset such as 'standard' or 'hd'." },
+                            style: { type: "string", description: "Stylistic guidance, e.g., 'vivid' or 'natural'." },
+                            response_format: { type: "string", enum: ["url", "b64_json"], description: "Return hosted URLs or base64 JSON." },
+                            user: { type: "string", description: "Optional end-user identifier for moderation context." },
+                            n: { type: "number", description: "Number of images to generate (default 1)." }
+                        },
+                        required: ["prompt"],
+                        additionalProperties: false
                     }
                 },
                 {

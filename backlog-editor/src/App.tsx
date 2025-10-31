@@ -31,13 +31,19 @@ type ApiResponse<T> = {
   data: T;
 };
 
-const STATUS_COLUMNS = [
+type StatusColumn = {
+  key: string;
+  label: string;
+  aliases?: string[];
+};
+
+const STATUS_COLUMNS: StatusColumn[] = [
   { key: "todo", label: "To Do" },
-  { key: "in-progress", label: "In Progress" },
+  { key: "in-progress", label: "In Progress", aliases: ["pending"] },
   { key: "blocked", label: "Blocked" },
   { key: "review", label: "In Review" },
   { key: "done", label: "Done" }
-] as const;
+];
 
 const PRIORITY_OPTIONS = ["P0", "P1", "P2", "P3", "Backlog"];
 
@@ -186,18 +192,29 @@ export default function App() {
     for (const column of STATUS_COLUMNS) {
       grouped[column.key] = [];
     }
+
     for (const item of backlog) {
-      const key = item.status || "todo";
-      if (!grouped[key]) {
-        grouped[key] = [];
+      const normalizedStatus = (item.status ?? "todo").toLowerCase();
+      const column = STATUS_COLUMNS.find(col => {
+        if (normalizedStatus === col.key.toLowerCase()) {
+          return true;
+        }
+        return col.aliases?.some(alias => alias.toLowerCase() === normalizedStatus);
+      });
+
+      const targetKey = column?.key ?? "todo";
+      if (!grouped[targetKey]) {
+        grouped[targetKey] = [];
       }
-      grouped[key].push(item);
+      grouped[targetKey].push(item);
     }
+
     for (const key of Object.keys(grouped)) {
       grouped[key] = grouped[key].sort(
         (a, b) => PRIORITY_OPTIONS.indexOf(a.priority) - PRIORITY_OPTIONS.indexOf(b.priority)
       );
     }
+
     return grouped;
   }, [backlog]);
 
