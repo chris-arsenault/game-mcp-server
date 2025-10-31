@@ -65,16 +65,51 @@ export class OpenAIImageService {
             n: params.n ?? 1
         };
 
-        const response = await this.client.post("/images/generations", payload);
-        const data = response.data;
-        if (!data || !Array.isArray(data.data)) {
-            throw new Error("Unexpected response from OpenAI image API");
-        }
+        try {
+            const response = await this.client.post("/images/generations", payload);
+            const data = response.data;
+            if (!data || !Array.isArray(data.data)) {
+                console.error("[OpenAIImageService] Unexpected response structure", {
+                    payload: this.safePayload(payload),
+                    response: data
+                });
+                throw new Error("Unexpected response from OpenAI image API");
+            }
 
-        return data.data.map((item: any) => ({
-            url: item.url,
-            b64_json: item.b64_json,
-            revised_prompt: item.revised_prompt
-        }));
+            return data.data.map((item: any) => ({
+                url: item.url,
+                b64_json: item.b64_json,
+                revised_prompt: item.revised_prompt
+            }));
+        } catch (error) {
+            if (axios.isAxiosError(error)) {
+                const status = error.response?.status;
+                const statusText = error.response?.statusText;
+                const responseData = error.response?.data;
+                console.error("[OpenAIImageService] Image generation request failed", {
+                    status,
+                    statusText,
+                    response: responseData,
+                    payload: this.safePayload(payload)
+                });
+                throw new Error(
+                    `OpenAI image generation failed: ${status ?? ""} ${statusText ?? error.message}`
+                );
+            }
+
+            console.error("[OpenAIImageService] Image generation error", {
+                error: error instanceof Error ? error.message : String(error),
+                payload: this.safePayload(payload)
+            });
+            throw error;
+        }
+    }
+
+    private safePayload(payload: Record<string, unknown>) {
+        const { prompt, ...rest } = payload;
+        return {
+            promptPreview: typeof prompt === "string" ? prompt.slice(0, 120) : undefined,
+            ...rest
+        };
     }
 }
