@@ -32,7 +32,7 @@ services:
       - NEO4J_PASSWORD=your-secure-password
       - QDRANT_URL=http://192.168.66.3:6333
       - EMBEDDING_URL=http://192.168.66.3:5361
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_KEY=
       - OPENAI_MODEL=gpt-5
       - LOG_LEVEL=info
     volumes:

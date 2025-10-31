@@ -314,7 +314,7 @@ app.get("/api/graph/entity", async (req, res) => {
     MATCH (center)
     WHERE center.id = $id OR elementId(center) = $id OR toString(id(center)) = $id
     WITH center
-    OPTIONAL MATCH path = (center)-[rels*1..$depth]-(neighbor)
+    OPTIONAL MATCH path = (center)-[rels*1..${depth}]-(neighbor)
     UNWIND CASE WHEN rels IS NULL THEN [NULL] ELSE rels END AS rel
     WITH center, neighbor, rel
     RETURN center,
@@ -323,7 +323,7 @@ app.get("/api/graph/entity", async (req, res) => {
   `;
 
   try {
-    const rows = await runCypher(statement, { id: identifier, depth });
+    const rows = await runCypher(statement, { id: identifier });
     if (rows.length === 0) {
       return res.status(404).json({ error: "Graph entity not found" });
     }
