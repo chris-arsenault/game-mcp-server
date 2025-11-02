@@ -1,0 +1,7 @@
+{
+  "defaultProject": "memory",
+  "projects": ["memory"],
+  "locks": {
+    "features": []
+  }
+}

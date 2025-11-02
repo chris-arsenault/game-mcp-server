@@ -11,9 +11,11 @@ services:
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=your-secure-password
       - GRAPH_COLLECTION=code_graph
+      - DEFAULT_PROJECT=memory
       - NODE_ENV=production
     volumes:
       - /mnt/apps/apps/mcp-server/game-mcp-server/mcp/config:/app/config
+      - /mnt/apps/apps/mcp-server/game-mcp-server/mcp/config:/app/mcp/config
     restart: unless-stopped
 
   graph-builder:
@@ -35,10 +37,12 @@ services:
       - OPENAI_API_KEY=
       - OPENAI_MODEL=gpt-5
       - LOG_LEVEL=info
+      - DEFAULT_PROJECT=memory
     volumes:
       - /mnt/apps/apps/mcp-server/graph-repo:/repo
       - /mnt/apps/apps/mcp-server/graph-staging:/staging
       - /mnt/apps/apps/mcp-server/game-mcp-server/graph-builder/config:/app/config
+      - /mnt/apps/apps/mcp-server/game-mcp-server/mcp/config:/app/mcp/config
     restart: unless-stopped
 
   backlog-editor:
@@ -59,4 +63,7 @@ services:
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=your-secure-password
       - GRAPH_MAX_DEPTH=3
+      - DEFAULT_PROJECT=memory
+    volumes:
+      - /mnt/apps/apps/mcp-server/game-mcp-server/mcp/config:/app/mcp/config
     restart: unless-stopped
