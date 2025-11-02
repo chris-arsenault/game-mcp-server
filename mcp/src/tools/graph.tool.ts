@@ -1,5 +1,6 @@
 import { EmbeddingService } from "../services/embedding.service.js";
 import { QdrantService } from "../services/qdrant.service.js";
+import { ProjectService } from "../services/project.service.js";
 import {
     GraphRelationship,
     GraphEntitySummary,
@@ -19,18 +20,15 @@ interface SearchGraphArgs {
 }
 
 export class GraphTool {
-    private collection: string;
-
     constructor(
         private neo4j: Neo4jService,
         private qdrant: QdrantService,
         private embedding: EmbeddingService,
-        collectionName: string
-    ) {
-        this.collection = collectionName;
-    }
+        private projects: ProjectService,
+        private collectionBaseName: string
+    ) {}
 
-    async exploreGraph(args: ExploreGraphArgs) {
+    async exploreGraph(projectId: string, args: ExploreGraphArgs) {
         const { entityId, maxNeighbors = 25 } = args;
 
         if (!entityId) {
@@ -38,6 +36,7 @@ export class GraphTool {
         }
 
         const result = await this.neo4j.getEntityWithNeighbors(
+            projectId,
             entityId,
             Math.max(1, Math.min(maxNeighbors, 100))
         );
@@ -56,7 +55,7 @@ export class GraphTool {
         };
     }
 
-    async searchGraph(args: SearchGraphArgs) {
+    async searchGraph(projectId: string, args: SearchGraphArgs) {
         const { query, limit = 10, type, minScore = 0.55 } = args;
 
         if (!query || query.trim().length === 0) {
@@ -76,7 +75,7 @@ export class GraphTool {
             : undefined;
 
         const results = await this.qdrant.search(
-            this.collection,
+            this.projects.collectionName(projectId, this.collectionBaseName),
             vector,
             Math.max(1, Math.min(limit, 20)),
             filter,

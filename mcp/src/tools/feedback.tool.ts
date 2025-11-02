@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
 import { CacheService } from "../services/cache.service.js";
+import { ProjectService } from "../services/project.service.js";
 import { GameplayFeedbackInput } from "../types/index.js";
 
 type QueryArgs = {
@@ -24,10 +25,11 @@ export class FeedbackTool {
     constructor(
         private qdrant: QdrantService,
         private embedding: EmbeddingService,
-        private cache: CacheService
+        private cache: CacheService,
+        private projects: ProjectService
     ) {}
 
-    async recordFeedback(args: GameplayFeedbackInput) {
+    async recordFeedback(projectId: string, args: GameplayFeedbackInput) {
         const {
             source,
             experience,
@@ -46,7 +48,7 @@ export class FeedbackTool {
             `${experience}\nPositives: ${positives.join(", ")}\nNegatives: ${negatives.join(", ")}\nSuggestions: ${suggestions.join(", ")}`
         );
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -64,7 +66,7 @@ export class FeedbackTool {
             },
         ]);
 
-        this.cache.clearPrefix("feedback:summary");
+        this.cache.clearPrefix(`feedback:${projectId}:summary`);
 
         return {
             success: true,
@@ -73,7 +75,7 @@ export class FeedbackTool {
         };
     }
 
-    async queryFeedback(args: QueryArgs) {
+    async queryFeedback(projectId: string, args: QueryArgs) {
         const {
             query,
             severity,
@@ -86,7 +88,7 @@ export class FeedbackTool {
         const filter = this.buildFilter({ severity, tags });
 
         const results: any[] = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -99,9 +101,9 @@ export class FeedbackTool {
         };
     }
 
-    async summarizeFeedback(args: SummaryArgs = {}) {
+    async summarizeFeedback(projectId: string, args: SummaryArgs = {}) {
         const { limit = 200, since } = args;
-        const cacheKey = `feedback:summary:${limit}:${since ?? ""}`;
+        const cacheKey = `feedback:${projectId}:summary:${limit}:${since ?? ""}`;
         const cached = this.cache.get<any>(cacheKey);
         if (cached) {
             return { ...cached, cached: true };
@@ -121,7 +123,7 @@ export class FeedbackTool {
             : undefined;
 
         const response: any = await this.qdrant.scroll(
-            this.collection,
+            this.getCollection(projectId),
             filter,
             limit
         );
@@ -201,5 +203,9 @@ export class FeedbackTool {
         }
 
         return { must };
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
     }
 }

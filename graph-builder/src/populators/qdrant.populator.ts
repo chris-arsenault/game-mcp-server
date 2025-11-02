@@ -2,34 +2,36 @@ import { QdrantClient } from '@qdrant/js-client-rest';
 import { EnrichedEntity } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { config } from '../utils/config.js';
+import { collectionName } from '../utils/project.js';
 
 export class QdrantPopulator {
     private client: QdrantClient;
-    private collectionName = 'code_graph';
+    private collectionBaseName = 'code_graph';
 
     constructor() {
         this.client = new QdrantClient({ url: config.qdrant.url });
     }
 
-    async initialize(): Promise<void> {
+    async initialize(projectId: string): Promise<void> {
         try {
             // Check if collection exists
             const collections = await this.client.getCollections();
-            const exists = collections.collections.some(c => c.name === this.collectionName);
+            const targetCollection = collectionName(projectId, this.collectionBaseName);
+            const exists = collections.collections.some(c => c.name === targetCollection);
 
             if (!exists) {
-                await this.client.createCollection(this.collectionName, {
+                await this.client.createCollection(targetCollection, {
                     vectors: {
                         size: 768, // align with embedding dimension
                         distance: 'Cosine'
                     }
                 });
-                logger.info(`Created Qdrant collection: ${this.collectionName}`);
+                logger.info(`Created Qdrant collection: ${targetCollection}`);
             } else {
-                const info = await this.client.getCollection(this.collectionName);
+                const info = await this.client.getCollection(targetCollection);
                 const currentSize = info.config?.params?.vectors?.size;
                 if (currentSize !== 768) {
-                    const message = `Qdrant collection ${this.collectionName} has dimension ${currentSize}, expected 768. Please recreate the collection to continue.`;
+                    const message = `Qdrant collection ${targetCollection} has dimension ${currentSize}, expected 768. Please recreate the collection to continue.`;
                     logger.error(message);
                     throw new Error(message);
                 }
@@ -40,8 +42,9 @@ export class QdrantPopulator {
         }
     }
 
-    async populateEntities(entities: EnrichedEntity[]): Promise<void> {
-        logger.info(`Populating ${entities.length} entities in Qdrant`);
+    async populateEntities(projectId: string, entities: EnrichedEntity[]): Promise<void> {
+        const targetCollection = collectionName(projectId, this.collectionBaseName);
+        logger.info(`Populating ${entities.length} entities in Qdrant collection ${targetCollection}`);
 
         // Only store entities with embeddings
         const withEmbeddings = entities.filter(e => e.embedding && e.embedding.length > 0);
@@ -74,7 +77,7 @@ export class QdrantPopulator {
         for (let i = 0; i < points.length; i += batchSize) {
             const batch = points.slice(i, i + batchSize);
 
-            await this.client.upsert(this.collectionName, {
+            await this.client.upsert(targetCollection, {
                 wait: true,
                 points: batch
             });
@@ -83,7 +86,7 @@ export class QdrantPopulator {
             logger.info(`Qdrant upsert progress: ${processed}/${total}`);
         }
 
-        logger.info('Qdrant population complete');
+        logger.info(`Qdrant population complete for ${targetCollection}`);
     }
 
     private hashId(id: string): number {

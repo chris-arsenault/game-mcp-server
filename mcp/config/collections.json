@@ -5,6 +5,9 @@
       "description": "Research reports, mechanic studies, and genre mashup references.",
       "dimension": 768,
       "distance": "Cosine",
+      "optimizersConfig": {
+        "indexing_threshold": 10000
+      },
       "primaryAgents": [
         "research-engine",
         "research-features",
@@ -36,6 +39,7 @@
       "description": "Acts, quests, characters, and thematic story beats for narrative teams.",
       "dimension": 768,
       "distance": "Cosine",
+      "onDiskPayload": true,
       "primaryAgents": [
         "narrative-writer",
         "narrative-dialog",
@@ -47,6 +51,7 @@
       "description": "Lore bibles, factions, locations, and cultural references.",
       "dimension": 768,
       "distance": "Cosine",
+      "onDiskPayload": true,
       "primaryAgents": [
         "narrative-world-building",
         "documenter"
@@ -57,6 +62,7 @@
       "description": "Dialogue scenes, branching conversations, and tone references.",
       "dimension": 768,
       "distance": "Cosine",
+      "onDiskPayload": true,
       "primaryAgents": [
         "narrative-dialog",
         "narrative-writer"
@@ -88,6 +94,7 @@
       "description": "Canonical bug fixes paired with the incorrect code patterns they replace.",
       "dimension": 768,
       "distance": "Cosine",
+      "onDiskPayload": true,
       "primaryAgents": [
         "engine-dev",
         "test-engineer",
@@ -99,6 +106,7 @@
       "description": "Embeddings produced by the graph builder for code, documentation, and architectural entities.",
       "dimension": 768,
       "distance": "Cosine",
+      "onDiskPayload": true,
       "primaryAgents": [
         "engine-dev",
         "architect",
@@ -111,6 +119,7 @@
       "description": "Single markdown handoff document passed between sessions.",
       "dimension": 768,
       "distance": "Cosine",
+      "onDiskPayload": true,
       "primaryAgents": [
         "engine-dev",
         "architect",
@@ -123,11 +132,24 @@
       "description": "Persistent store for product backlog items with metadata, tags, and semantic embeddings.",
       "dimension": 768,
       "distance": "Cosine",
+      "onDiskPayload": true,
       "primaryAgents": [
         "engine-dev",
         "architect",
         "producer",
         "qa-lead"
+      ]
+    },
+    {
+      "name": "features",
+      "description": "High-level feature definitions that aggregate multiple PBIs and cross-team initiatives.",
+      "dimension": 768,
+      "distance": "Cosine",
+      "onDiskPayload": true,
+      "primaryAgents": [
+        "producer",
+        "engine-dev",
+        "architect"
       ]
     }
   ]

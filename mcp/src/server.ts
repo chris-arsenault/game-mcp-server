@@ -12,6 +12,7 @@ import { QdrantService } from "./services/qdrant.service.js";
 import { EmbeddingService } from "./services/embedding.service.js";
 import { CacheService } from "./services/cache.service.js";
 import { Neo4jService } from "./services/neo4j.service.js";
+import { ProjectService } from "./services/project.service.js";
 import { ResearchTool } from "./tools/research.tool.js";
 import { PatternTool } from "./tools/pattern.tool.js";
 import { ArchitectureTool } from "./tools/architecture.tool.js";
@@ -26,6 +27,21 @@ import { BugFixTool } from "./tools/bugfix.tool.js";
 import { GraphTool } from "./tools/graph.tool.js";
 import { HandoffTool } from "./tools/handoff.tool.js";
 import { BacklogTool } from "./tools/backlog.tool.js";
+import { FeatureTool } from "./tools/feature.tool.js";
+
+type ToolHandler = (args: Record<string, unknown>, context: ToolExecutionContext) => Promise<unknown>;
+
+interface ToolExecutionContext {
+    projectId: string;
+    sessionId?: string;
+}
+
+interface ProjectTransportState {
+    transport: StreamableHTTPServerTransport;
+    hasActiveSession: boolean;
+    currentSessionId?: string;
+    sseSessions: Map<string, SSEServerTransport>;
+}
 
 export class GameDevMCPServer {
     private server: Server;
@@ -33,13 +49,12 @@ export class GameDevMCPServer {
     private embedding: EmbeddingService;
     private neo4j: Neo4jService;
     private cache: CacheService;
-    private tools: Map<string, any>;
+    private projectService: ProjectService;
+    private tools: Map<string, ToolHandler>;
     private httpServer?: HttpServer;
-    private transport?: StreamableHTTPServerTransport;
-    private sseSessions: Map<string, SSEServerTransport>;
+    private projectStates: Map<string, ProjectTransportState>;
+    private sessionProjectMap: Map<string, string>;
     private toolStats: Map<string, { writes: number; reads: number }>;
-    private hasActiveSession = false;
-    private currentSessionId?: string;
     private readonly writeTools = new Set<string>([
         "cache_research",
         "store_pattern",
@@ -52,7 +67,11 @@ export class GameDevMCPServer {
         "record_bug_fix",
         "store_handoff",
         "create_backlog_item",
-        "update_backlog_item"
+        "update_backlog_item",
+        "create_feature",
+        "update_feature",
+        "assign_backlog_to_feature",
+        "set_feature_lock"
     ]);
     private readonly readTools = new Set<string>([
         "query_research",
@@ -83,7 +102,10 @@ export class GameDevMCPServer {
         "fetch_handoff",
         "search_backlog_by_tag",
         "search_backlog_semantic",
-        "get_top_backlog_items"
+        "get_top_backlog_items",
+        "list_features",
+        "get_feature",
+        "list_feature_backlog_items"
     ]);
 
     constructor() {
@@ -112,7 +134,9 @@ export class GameDevMCPServer {
             process.env.NEO4J_PASSWORD || "password"
         );
         this.cache = new CacheService();
-        this.sseSessions = new Map();
+        this.projectService = new ProjectService(this.qdrant);
+        this.projectStates = new Map();
+        this.sessionProjectMap = new Map();
         this.toolStats = new Map();
 
         // Initialize tools
@@ -122,116 +146,230 @@ export class GameDevMCPServer {
     }
 
     private initializeTools() {
-        const researchTool = new ResearchTool(this.qdrant, this.embedding);
-        const patternTool = new PatternTool(this.qdrant, this.embedding);
+        const researchTool = new ResearchTool(this.qdrant, this.embedding, this.projectService);
+        const patternTool = new PatternTool(this.qdrant, this.embedding, this.projectService);
         const architectureTool = new ArchitectureTool(
             this.qdrant,
             this.embedding,
-            this.cache
+            this.cache,
+            this.projectService
         );
         const validationTool = new ValidationTool(
             this.qdrant,
             this.embedding,
-            this.cache
+            this.cache,
+            this.projectService
         );
         const narrativeTool = new NarrativeTool(
             this.qdrant,
             this.embedding,
-            this.cache
+            this.cache,
+            this.projectService
         );
         const worldbuildingTool = new WorldbuildingTool(
             this.qdrant,
             this.embedding,
-            this.cache
+            this.cache,
+            this.projectService
         );
         const dialogueTool = new DialogueTool(
             this.qdrant,
             this.embedding,
-            this.cache
+            this.cache,
+            this.projectService
         );
         const testingTool = new TestingTool(
             this.qdrant,
             this.embedding,
-            this.cache
+            this.cache,
+            this.projectService
         );
         const feedbackTool = new FeedbackTool(
             this.qdrant,
             this.embedding,
-            this.cache
+            this.cache,
+            this.projectService
         );
-        const metadataTool = new MetadataTool(this.cache);
-        const bugFixTool = new BugFixTool(this.qdrant, this.embedding);
+        const metadataTool = new MetadataTool(this.cache, this.projectService);
+        const bugFixTool = new BugFixTool(this.qdrant, this.embedding, this.projectService);
         const graphTool = new GraphTool(
             this.neo4j,
             this.qdrant,
             this.embedding,
+            this.projectService,
             process.env.GRAPH_COLLECTION || "code_graph"
         );
-        const handoffTool = new HandoffTool(this.qdrant, this.embedding);
-        const backlogTool = new BacklogTool(this.qdrant, this.embedding);
+        const handoffTool = new HandoffTool(this.qdrant, this.embedding, this.projectService);
+        const backlogTool = new BacklogTool(this.qdrant, this.embedding, this.projectService);
+        const featureTool = new FeatureTool(this.qdrant, this.embedding, this.projectService, backlogTool);
+
+        const resolveProject = (context: ToolExecutionContext): string => {
+            const projectId = context.projectId ?? this.projectService.getDefaultProject();
+            return this.projectService.requireProject(projectId);
+        };
 
         // Register research tools
-        this.tools.set("cache_research", researchTool.cacheResearch.bind(researchTool));
-        this.tools.set("query_research", researchTool.queryResearch.bind(researchTool));
-
-        this.tools.set("check_research_exists", researchTool.checkExists.bind(researchTool));
-
+        this.tools.set("cache_research", async (args, context) =>
+            researchTool.cacheResearch(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("query_research", async (args, context) =>
+            researchTool.queryResearch(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("check_research_exists", async (args, context) =>
+            researchTool.checkExists(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register pattern tools
-        this.tools.set("store_pattern", patternTool.storePattern.bind(patternTool));
-        this.tools.set("find_similar_patterns", patternTool.findSimilar.bind(patternTool));
-        this.tools.set("get_pattern_by_name", patternTool.getByName.bind(patternTool));
+        this.tools.set("store_pattern", async (args, context) =>
+            patternTool.storePattern(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("find_similar_patterns", async (args, context) =>
+            patternTool.findSimilar(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_pattern_by_name", async (args, context) =>
+            patternTool.getByName(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register architecture tools
-        this.tools.set("store_architecture_decision", architectureTool.storeDecision.bind(architectureTool));
-        this.tools.set("query_architecture", architectureTool.queryDecisions.bind(architectureTool));
-        this.tools.set("get_architecture_history", architectureTool.getHistory.bind(architectureTool));
+        this.tools.set("store_architecture_decision", async (args, context) =>
+            architectureTool.storeDecision(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("query_architecture", async (args, context) =>
+            architectureTool.queryDecisions(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_architecture_history", async (args, context) =>
+            architectureTool.getHistory(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register validation tools
-        this.tools.set("validate_against_patterns", validationTool.validatePatterns.bind(validationTool));
-        this.tools.set("check_consistency", validationTool.checkConsistency.bind(validationTool));
+        this.tools.set("validate_against_patterns", async (args, context) =>
+            validationTool.validatePatterns(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("check_consistency", async (args, context) =>
+            validationTool.checkConsistency(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register narrative tools
-        this.tools.set("store_narrative_element", narrativeTool.storeNarrativeElement.bind(narrativeTool));
-        this.tools.set("search_narrative_elements", narrativeTool.searchNarrativeElements.bind(narrativeTool));
-        this.tools.set("get_narrative_outline", narrativeTool.getNarrativeOutline.bind(narrativeTool));
+        this.tools.set("store_narrative_element", async (args, context) =>
+            narrativeTool.storeNarrativeElement(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("search_narrative_elements", async (args, context) =>
+            narrativeTool.searchNarrativeElements(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_narrative_outline", async (args, context) =>
+            narrativeTool.getNarrativeOutline(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register worldbuilding tools
-        this.tools.set("store_lore_entry", worldbuildingTool.storeLoreEntry.bind(worldbuildingTool));
-        this.tools.set("search_lore", worldbuildingTool.searchLore.bind(worldbuildingTool));
-        this.tools.set("list_lore", worldbuildingTool.listLore.bind(worldbuildingTool));
+        this.tools.set("store_lore_entry", async (args, context) =>
+            worldbuildingTool.storeLoreEntry(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("search_lore", async (args, context) =>
+            worldbuildingTool.searchLore(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("list_lore", async (args, context) =>
+            worldbuildingTool.listLore(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register dialogue tools
-        this.tools.set("store_dialogue_scene", dialogueTool.storeDialogueScene.bind(dialogueTool));
-        this.tools.set("find_dialogue", dialogueTool.findDialogue.bind(dialogueTool));
-        this.tools.set("get_dialogue_scene", dialogueTool.getScene.bind(dialogueTool));
+        this.tools.set("store_dialogue_scene", async (args, context) =>
+            dialogueTool.storeDialogueScene(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("find_dialogue", async (args, context) =>
+            dialogueTool.findDialogue(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_dialogue_scene", async (args, context) =>
+            dialogueTool.getScene(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register testing tools
-        this.tools.set("store_test_strategy", testingTool.storeTestStrategy.bind(testingTool));
-        this.tools.set("query_test_strategies", testingTool.queryTestStrategies.bind(testingTool));
-        this.tools.set("list_test_strategies_by_focus", testingTool.listByFocusArea.bind(testingTool));
+        this.tools.set("store_test_strategy", async (args, context) =>
+            testingTool.storeTestStrategy(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("query_test_strategies", async (args, context) =>
+            testingTool.queryTestStrategies(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("list_test_strategies_by_focus", async (args, context) =>
+            testingTool.listByFocusArea(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register feedback tools
-        this.tools.set("record_playtest_feedback", feedbackTool.recordFeedback.bind(feedbackTool));
-        this.tools.set("query_playtest_feedback", feedbackTool.queryFeedback.bind(feedbackTool));
-        this.tools.set("summarize_playtest_feedback", feedbackTool.summarizeFeedback.bind(feedbackTool));
-        this.tools.set("record_bug_fix", bugFixTool.recordBugFix.bind(bugFixTool));
-        this.tools.set("match_bug_fix", bugFixTool.matchBugFix.bind(bugFixTool));
-        this.tools.set("get_bug_fix", bugFixTool.getBugFix.bind(bugFixTool));
-        this.tools.set("explore_graph_entity", graphTool.exploreGraph.bind(graphTool));
-        this.tools.set("search_graph_semantic", graphTool.searchGraph.bind(graphTool));
-        this.tools.set("store_handoff", handoffTool.storeHandoff.bind(handoffTool));
-        this.tools.set("fetch_handoff", handoffTool.fetchHandoff.bind(handoffTool));
-        this.tools.set("create_backlog_item", backlogTool.createBacklogItem.bind(backlogTool));
-        this.tools.set("update_backlog_item", backlogTool.updateBacklogItem.bind(backlogTool));
-        this.tools.set("search_backlog_by_tag", backlogTool.searchBacklogByTag.bind(backlogTool));
-        this.tools.set("search_backlog_semantic", backlogTool.searchBacklogSemantics.bind(backlogTool));
-        this.tools.set("get_top_backlog_items", backlogTool.getTopBacklogItems.bind(backlogTool));
+        this.tools.set("record_playtest_feedback", async (args, context) =>
+            feedbackTool.recordFeedback(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("query_playtest_feedback", async (args, context) =>
+            feedbackTool.queryFeedback(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("summarize_playtest_feedback", async (args, context) =>
+            feedbackTool.summarizeFeedback(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("record_bug_fix", async (args, context) =>
+            bugFixTool.recordBugFix(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("match_bug_fix", async (args, context) =>
+            bugFixTool.matchBugFix(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_bug_fix", async (args, context) =>
+            bugFixTool.getBugFix(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("explore_graph_entity", async (args, context) =>
+            graphTool.exploreGraph(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("search_graph_semantic", async (args, context) =>
+            graphTool.searchGraph(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("store_handoff", async (args, context) =>
+            handoffTool.storeHandoff(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("fetch_handoff", async (_args, context) =>
+            handoffTool.fetchHandoff(resolveProject(context))
+        );
+        this.tools.set("create_backlog_item", async (args, context) =>
+            backlogTool.createBacklogItem(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("update_backlog_item", async (args, context) =>
+            backlogTool.updateBacklogItem(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("search_backlog_by_tag", async (args, context) =>
+            backlogTool.searchBacklogByTag(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("search_backlog_semantic", async (args, context) =>
+            backlogTool.searchBacklogSemantics(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_top_backlog_items", async (args, context) =>
+            backlogTool.getTopBacklogItems(resolveProject(context), (args ?? {}) as any)
+        );
+
+        this.tools.set("create_feature", async (args, context) =>
+            featureTool.createFeature(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("update_feature", async (args, context) =>
+            featureTool.updateFeature(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("list_features", async (args, context) =>
+            featureTool.listFeatures(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_feature", async (args, context) =>
+            featureTool.getFeature(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("assign_backlog_to_feature", async (args, context) =>
+            featureTool.assignBacklogItem(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("list_feature_backlog_items", async (args, context) =>
+            featureTool.listFeatureBacklogItems(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("set_feature_lock", async (args, context) =>
+            featureTool.setFeatureLock(resolveProject(context), (args ?? {}) as any)
+        );
 
         // Register metadata/discovery tools
-        this.tools.set("get_server_metadata", metadataTool.getServerMetadata.bind(metadataTool));
-        this.tools.set("list_qdrant_collections", metadataTool.listCollections.bind(metadataTool));
-        this.tools.set("get_mcp_documentation", metadataTool.getDocumentation.bind(metadataTool));
+        this.tools.set("get_server_metadata", async () => metadataTool.getServerMetadata());
+        this.tools.set("list_qdrant_collections", async (_args, context) =>
+            metadataTool.listCollections(resolveProject(context))
+        );
+        this.tools.set("get_mcp_documentation", async (args) =>
+            metadataTool.getDocumentation((args ?? {}) as any)
+        );
     }
 
     private incrementToolStat(tool: string, type: 'writes' | 'reads') {
@@ -307,67 +445,119 @@ export class GameDevMCPServer {
         return false;
     }
 
-    private buildTransport(): StreamableHTTPServerTransport {
+    private buildTransport(projectId: string): StreamableHTTPServerTransport {
         const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             enableJsonResponse: true,
-            onsessioninitialized: (sessionId) => {
-                this.hasActiveSession = true;
-                this.currentSessionId = sessionId ?? undefined;
-                console.info(
-                    "[MCP] Streamable HTTP session initialized",
-                    { sessionId: this.currentSessionId }
-                );
+            onsessioninitialized: async (sessionId) => {
+                if (sessionId) {
+                    this.handleSessionInitialized(projectId, sessionId);
+                }
             },
-            onsessionclosed: (sessionId) => {
-                console.info("[MCP] Streamable HTTP session closed", { sessionId });
-                this.hasActiveSession = false;
-                this.currentSessionId = undefined;
+            onsessionclosed: async (sessionId) => {
+                this.handleSessionClosed(projectId, sessionId);
             }
         });
+        transport.onerror = (error) => {
+            console.error("[MCP] Streamable HTTP transport error", {
+                projectId,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        };
         return transport;
     }
 
-    private async initializeTransport() {
-        const newTransport = this.buildTransport();
-        await this.server.connect(newTransport);
-        this.transport = newTransport;
-        this.hasActiveSession = false;
-        this.currentSessionId = undefined;
-    }
-
-    private async resetTransport() {
-        console.warn("[MCP] Resetting Streamable HTTP transport for new session", {
-            previousSessionId: this.currentSessionId
-        });
-        await this.closeAllSseSessions();
-        if (this.transport) {
-            try {
-                await this.transport.close();
-            } catch (error) {
-                console.error("[MCP] Error closing previous transport", {
-                    error: error instanceof Error ? error.message : String(error)
-                });
-            }
+    private async ensureTransport(projectId: string): Promise<ProjectTransportState> {
+        let state = this.projectStates.get(projectId);
+        if (state) {
+            return state;
         }
-        await this.initializeTransport();
+        const transport = this.buildTransport(projectId);
+        await this.server.connect(transport);
+        state = {
+            transport,
+            hasActiveSession: false,
+            currentSessionId: undefined,
+            sseSessions: new Map()
+        };
+        this.projectStates.set(projectId, state);
+        return state;
     }
 
-    private async closeAllSseSessions() {
-        if (this.sseSessions.size === 0) {
+    private async resetTransport(projectId: string): Promise<ProjectTransportState> {
+        const state = this.projectStates.get(projectId);
+        if (!state) {
+            return this.ensureTransport(projectId);
+        }
+
+        console.warn("[MCP] Resetting Streamable HTTP transport for project", {
+            projectId,
+            previousSessionId: state.currentSessionId
+        });
+
+        await this.closeProjectSseSessions(projectId);
+
+        if (state.currentSessionId) {
+            this.sessionProjectMap.delete(state.currentSessionId);
+        }
+
+        try {
+            await state.transport.close();
+        } catch (error) {
+            console.error("[MCP] Error closing previous transport", {
+                projectId,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+
+        this.projectStates.delete(projectId);
+        return this.ensureTransport(projectId);
+    }
+
+    private async closeProjectSseSessions(projectId: string) {
+        const state = this.projectStates.get(projectId);
+        if (!state || state.sseSessions.size === 0) {
             return;
         }
-        const sessions = Array.from(this.sseSessions.values());
-        this.sseSessions.clear();
+
+        const sessions = Array.from(state.sseSessions.values());
+        state.sseSessions.clear();
         for (const session of sessions) {
             try {
                 await session.close();
             } catch (error) {
                 console.warn("[MCP] Failed to close SSE session", {
+                    projectId,
+                    sessionId: session.sessionId,
                     error: error instanceof Error ? error.message : String(error)
                 });
+            } finally {
+                this.sessionProjectMap.delete(session.sessionId);
             }
         }
+    }
+
+    private handleSessionInitialized(projectId: string, sessionId: string) {
+        const state = this.projectStates.get(projectId);
+        if (state) {
+            state.hasActiveSession = true;
+            state.currentSessionId = sessionId;
+        }
+        this.sessionProjectMap.set(sessionId, projectId);
+        console.info("[MCP] Streamable HTTP session initialized", { projectId, sessionId });
+    }
+
+    private handleSessionClosed(projectId: string, sessionId?: string) {
+        if (!sessionId) {
+            return;
+        }
+        const state = this.projectStates.get(projectId);
+        if (state && state.currentSessionId === sessionId) {
+            state.hasActiveSession = false;
+            state.currentSessionId = undefined;
+        }
+        this.sessionProjectMap.delete(sessionId);
+        console.info("[MCP] Streamable HTTP session closed", { projectId, sessionId });
     }
 
     private isInitializationRequest(body: unknown): boolean {
@@ -645,7 +835,8 @@ export class GameDevMCPServer {
                             acceptance_criteria: { type: "array", items: { type: "string" }, description: "Testable acceptance criteria or success conditions." },
                             dependencies: { type: "array", items: { type: "string" }, description: "Related item IDs or external blockers." },
                             notes: { type: "string", description: "Freeform notes, research links, or context." },
-                            category: { type: "string", description: "Optional thematic grouping (e.g., 'tech-debt', 'narrative', 'systems')." }
+                            category: { type: "string", description: "Optional thematic grouping (e.g., 'tech-debt', 'narrative', 'systems')." },
+                            feature_id: { type: "string", description: "Optional feature identifier that groups related backlog items." }
                         },
                         required: ["title", "description", "status", "priority"]
                     }
@@ -671,7 +862,8 @@ export class GameDevMCPServer {
                             acceptance_criteria: { type: "array", items: { type: "string" } },
                             dependencies: { type: "array", items: { type: "string" } },
                             notes: { type: "string" },
-                            category: { type: "string" }
+                            category: { type: "string" },
+                            feature_id: { type: "string" }
                         },
                         required: ["id"]
                     }
@@ -686,7 +878,8 @@ export class GameDevMCPServer {
                             status: { type: "string", description: "Optional workflow status filter." },
                             priority: { type: "string", description: "Optional priority filter." },
                             owner: { type: "string", description: "Optional owner / DRI filter." },
-                            limit: { type: "number", description: "Maximum results to return (default 25)." }
+                            limit: { type: "number", description: "Maximum results to return (default 25)." },
+                            feature_id: { type: "string", description: "Optional feature identifier to filter associated PBIs." }
                         }
                     }
                 },
@@ -702,7 +895,8 @@ export class GameDevMCPServer {
                             priority: { type: "string", description: "Optional priority filter." },
                             owner: { type: "string", description: "Optional owner filter." },
                             limit: { type: "number", description: "Maximum results to return (default 10)." },
-                            min_score: { type: "number", description: "Similarity threshold between 0-1 (default 0.55)." }
+                            min_score: { type: "number", description: "Similarity threshold between 0-1 (default 0.55)." },
+                            feature_id: { type: "string", description: "Optional feature identifier to filter associated PBIs." }
                         },
                         required: ["query"]
                     }
@@ -716,6 +910,102 @@ export class GameDevMCPServer {
                             limit: { type: "number", description: "Maximum number of items to return (default 5, max 20)." },
                             includeCompleted: { type: "boolean", description: "Set true to include completed items in the ranking." }
                         }
+                    }
+                },
+                {
+                    name: "create_feature",
+                    description: "Create a new feature definition that groups multiple backlog items.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            name: { type: "string", description: "Feature title." },
+                            description: { type: "string", description: "Optional narrative or outcome statement." },
+                            tags: { type: "array", items: { type: "string" }, description: "Optional labels for planning queries." },
+                            status: { type: "string", description: "Lifecycle state (e.g., proposed, in-progress, delivered)." },
+                            owner: { type: "string", description: "Optional directly responsible individual." }
+                        },
+                        required: ["name"],
+                        additionalProperties: false
+                    }
+                },
+                {
+                    name: "update_feature",
+                    description: "Modify fields on an existing feature by ID.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            id: { type: "string", description: "Feature identifier." },
+                            name: { type: "string" },
+                            description: { type: "string" },
+                            tags: { type: "array", items: { type: "string" } },
+                            status: { type: "string" },
+                            owner: { type: "string" }
+                        },
+                        required: ["id"],
+                        additionalProperties: false
+                    }
+                },
+                {
+                    name: "list_features",
+                    description: "List features with optional tag/status filters or a semantic query.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            limit: { type: "number", description: "Maximum number of features to return (default 25)." },
+                            tags: { type: "array", items: { type: "string" }, description: "Optional tag filter." },
+                            status: { type: "string", description: "Optional status filter." },
+                            query: { type: "string", description: "Optional semantic search query." }
+                        },
+                        additionalProperties: false
+                    }
+                },
+                {
+                    name: "get_feature",
+                    description: "Retrieve a single feature by ID.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            id: { type: "string", description: "Feature identifier." }
+                        },
+                        required: ["id"],
+                        additionalProperties: false
+                    }
+                },
+                {
+                    name: "assign_backlog_to_feature",
+                    description: "Link an existing backlog item to a feature for rollout tracking.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            feature_id: { type: "string", description: "Feature identifier." },
+                            backlog_id: { type: "string", description: "Backlog item identifier." }
+                        },
+                        required: ["feature_id", "backlog_id"],
+                        additionalProperties: false
+                    }
+                },
+                {
+                    name: "list_feature_backlog_items",
+                    description: "Return backlog items associated with a given feature.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            feature_id: { type: "string", description: "Feature identifier to inspect." }
+                        },
+                        required: ["feature_id"],
+                        additionalProperties: false
+                    }
+                },
+                {
+                    name: "set_feature_lock",
+                    description: "Toggle the feature creation lock for the current project.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            locked: { type: "boolean", description: "Set true to block new features, false to allow them." }
+                        },
+                        required: ["locked"],
+                        additionalProperties: false
                     }
                 },
                 {
@@ -1162,7 +1452,7 @@ export class GameDevMCPServer {
         }));
 
         // Handle tool calls
-        this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+        this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
             const { name, arguments: args } = request.params;
 
             const tool = this.tools.get(name);
@@ -1171,7 +1461,15 @@ export class GameDevMCPServer {
             }
 
             try {
-                const result = await tool(args);
+                const sessionId = extra?.sessionId;
+                const projectId =
+                    (sessionId ? this.sessionProjectMap.get(sessionId) : undefined) ??
+                    this.projectService.getDefaultProject();
+
+                const result = await tool((args ?? {}) as Record<string, unknown>, {
+                    projectId,
+                    sessionId: sessionId ?? undefined
+                });
                 if (this.writeTools.has(name) && this.wasSuccessfulWrite(result)) {
                     this.incrementToolStat(name, 'writes');
                 }
@@ -1206,93 +1504,177 @@ export class GameDevMCPServer {
 
     async start() {
         const port = Number(process.env.PORT || 3000);
-        await this.initializeTransport();
+        await this.projectService.initialize();
 
         const app = express();
         app.use(express.json({ limit: "4mb" }));
 
-        const routerPath = process.env.MCP_PATH || "/mcp";
+        const rawRouterPath = process.env.MCP_PATH || "/mcp";
+        const routerPath = rawRouterPath.startsWith("/") ? rawRouterPath : `/${rawRouterPath}`;
+        const defaultProject = this.projectService.getDefaultProject();
 
-        const postHandler = async (req: Request, res: Response, next: NextFunction) => {
+        const normalizeProjectParam = (raw: string | undefined): string | undefined => {
+            if (!raw) {
+                return undefined;
+            }
+            const normalized = raw
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9-_]/g, "-")
+                .replace(/-+/g, "-")
+                .replace(/^-+|-+$/g, "");
+            if (!normalized) {
+                return undefined;
+            }
+            return this.projectService.hasProject(normalized) ? normalized : undefined;
+        };
+
+        const ensureProjectOr404 = (raw: string | undefined, res: Response): string | undefined => {
+            const projectId = normalizeProjectParam(raw);
+            if (!projectId) {
+                res.status(404).json({ error: `Unknown project '${raw ?? ""}'` });
+                return undefined;
+            }
+            return projectId;
+        };
+
+        const handlePost = async (projectId: string, req: Request, res: Response, next: NextFunction) => {
             try {
+                let state = await this.ensureTransport(projectId);
                 const isInitialization = this.isInitializationRequest(req.body);
 
                 if (isInitialization) {
-                    await this.resetTransport();
-                } else if (this.hasActiveSession) {
+                    state = await this.resetTransport(projectId);
+                } else if (state.hasActiveSession) {
                     const sessionHeader = this.getSessionHeaderFromRequest(req);
-                    if (!sessionHeader) {
-                        await this.resetTransport();
+                    if (!sessionHeader || sessionHeader !== state.currentSessionId) {
+                        state = await this.resetTransport(projectId);
                     }
                 }
+
                 const baseUrl = this.getPublicBaseUrl(req);
                 if (baseUrl) {
                     this.patchSseResponse(res, baseUrl);
                 }
-                await this.transport!.handleRequest(req, res, req.body);
+                await state.transport.handleRequest(req, res, req.body);
             } catch (error) {
                 next(error);
             }
         };
 
-        const genericHandler = async (req: Request, res: Response, next: NextFunction) => {
+        const handleGeneric = async (projectId: string, req: Request, res: Response, next: NextFunction) => {
             try {
+                const state = await this.ensureTransport(projectId);
                 const baseUrl = this.getPublicBaseUrl(req);
                 if (baseUrl) {
                     this.patchSseResponse(res, baseUrl);
                 }
-                await this.transport!.handleRequest(req, res);
+                await state.transport.handleRequest(req, res);
             } catch (error) {
                 next(error);
             }
         };
 
-        app.get("/sse", async (req, res, next) => {
+        const registerMcpRoutes = (path: string, projectProvider: (req: Request, res: Response) => string | undefined) => {
+            app.post(path, async (req, res, next) => {
+                const projectId = projectProvider(req, res);
+                if (!projectId) {
+                    return;
+                }
+                await handlePost(projectId, req, res, next);
+            });
+
+            app.get(path, async (req, res, next) => {
+                const projectId = projectProvider(req, res);
+                if (!projectId) {
+                    return;
+                }
+                await handleGeneric(projectId, req, res, next);
+            });
+
+            app.delete(path, async (req, res, next) => {
+                const projectId = projectProvider(req, res);
+                if (!projectId) {
+                    return;
+                }
+                await handleGeneric(projectId, req, res, next);
+            });
+        };
+
+        registerMcpRoutes(routerPath, () => defaultProject);
+        registerMcpRoutes(`/:project${routerPath}`, (req, res) => ensureProjectOr404(req.params.project, res));
+
+        const handleSse = async (projectId: string, req: Request, res: Response, next: NextFunction) => {
             try {
                 const baseUrl = this.getPublicBaseUrl(req);
-
                 if (baseUrl) {
                     this.patchSseResponse(res, baseUrl);
                 }
 
-                const transport = new SSEServerTransport("/messages", res);
+                const state = await this.ensureTransport(projectId);
+                const endpoint = `/${projectId}/messages`;
+                const transport = new SSEServerTransport(endpoint, res);
                 transport.onclose = () => {
-                    this.sseSessions.delete(transport.sessionId);
+                    state.sseSessions.delete(transport.sessionId);
+                    this.sessionProjectMap.delete(transport.sessionId);
                 };
                 transport.onerror = (error) => {
-                    console.error("SSE transport error:", error);
+                    console.error("[MCP] SSE transport error", {
+                        projectId,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
                 };
+
+                this.sessionProjectMap.set(transport.sessionId, projectId);
+                state.sseSessions.set(transport.sessionId, transport);
                 await this.server.connect(transport);
-                this.sseSessions.set(transport.sessionId, transport);
             } catch (error) {
                 next(error);
             }
-        });
+        };
 
-        // Endpoint for JSON-RPC messages sent over SSE transport
-        app.post("/messages", async (req, res) => {
+        const registerSseRoute = (path: string, projectProvider: (req: Request, res: Response) => string | undefined) => {
+            app.get(path, async (req, res, next) => {
+                const projectId = projectProvider(req, res);
+                if (!projectId) {
+                    return;
+                }
+                await handleSse(projectId, req, res, next);
+            });
+        };
+
+        registerSseRoute("/sse", () => defaultProject);
+        registerSseRoute("/:project/sse", (req, res) => ensureProjectOr404(req.params.project, res));
+
+        const handleMessagePost = async (projectId: string, req: Request, res: Response) => {
             const querySessionId = req.query.sessionId;
             if (Array.isArray(querySessionId)) {
-                return res.status(400).json({ error: "Only a single sessionId may be provided" });
+                res.status(400).json({ error: "Only a single sessionId may be provided" });
+                return;
             }
 
             if (querySessionId && typeof querySessionId !== "string") {
-                return res.status(400).json({ error: "sessionId must be provided as a string" });
+                res.status(400).json({ error: "sessionId must be provided as a string" });
+                return;
             }
 
             const headerSessionId = req.header("Mcp-Session-Id");
             if (Array.isArray(headerSessionId)) {
-                return res.status(400).json({ error: "Only a single Mcp-Session-Id header may be provided" });
+                res.status(400).json({ error: "Only a single Mcp-Session-Id header may be provided" });
+                return;
             }
 
             const sessionId = querySessionId ?? headerSessionId;
             if (!sessionId) {
-                return res.status(400).json({ error: "Missing sessionId" });
+                res.status(400).json({ error: "Missing sessionId" });
+                return;
             }
 
-            const transport = this.sseSessions.get(sessionId);
+            const state = this.projectStates.get(projectId);
+            const transport = state?.sseSessions.get(sessionId);
             if (!transport) {
-                return res.status(404).json({ error: "Session not found" });
+                res.status(404).json({ error: "Session not found" });
+                return;
             }
 
             try {
@@ -1303,11 +1685,47 @@ export class GameDevMCPServer {
                     res.status(500).json({ error: "Internal server error" });
                 }
             }
-        });
+        };
 
-        app.post(routerPath, postHandler);
-        app.get(routerPath, genericHandler);
-        app.delete(routerPath, genericHandler);
+        const registerMessageRoute = (path: string, projectProvider: (req: Request, res: Response) => string | undefined) => {
+            app.post(path, async (req, res) => {
+                const projectId = projectProvider(req, res);
+                if (!projectId) {
+                    return;
+                }
+                await handleMessagePost(projectId, req, res);
+            });
+        };
+
+        registerMessageRoute("/messages", () => defaultProject);
+        registerMessageRoute("/:project/messages", (req, res) => ensureProjectOr404(req.params.project, res));
+
+        app.post("/project", async (req, res) => {
+            const rawId = typeof req.body?.id === "string" ? req.body.id : typeof req.body?.name === "string" ? req.body.name : "";
+            if (!rawId || rawId.trim().length === 0) {
+                return res.status(400).json({ error: "Project id is required" });
+            }
+
+            try {
+                const result = await this.projectService.createProject(rawId);
+                res.status(201).json({
+                    project: result.projectId,
+                    collections: result.collections.map((collection) => ({
+                        baseName: collection.baseName,
+                        name: collection.name
+                    }))
+                });
+            } catch (error) {
+                if (error instanceof Error && /already exists/.test(error.message)) {
+                    res.status(409).json({ error: error.message });
+                    return;
+                }
+                console.error("[MCP] Failed to create project", {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                res.status(500).json({ error: "Failed to create project" });
+            }
+        });
 
         app.get("/stats", (_req, res) => {
             const stats = Array.from(this.toolStats.entries()).map(([tool, counts]) => ({
@@ -1348,7 +1766,9 @@ export class GameDevMCPServer {
 
         await new Promise<void>((resolve, reject) => {
             this.httpServer = app.listen(port, () => {
-                console.error(`Game Dev MCP Server listening on http://0.0.0.0:${port}${routerPath}`);
+                console.error(
+                    `Game Dev MCP Server listening on http://0.0.0.0:${port}/${defaultProject}${routerPath} (default project '${defaultProject}')`
+                );
                 resolve();
             });
             this.httpServer.on("error", reject);

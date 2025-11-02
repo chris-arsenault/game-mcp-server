@@ -33,15 +33,15 @@ export class Neo4jService {
         });
     }
 
-    async getEntity(id: string): Promise<GraphEntitySummary | null> {
+    async getEntity(projectId: string, id: string): Promise<GraphEntitySummary | null> {
         const session = this.driver.session();
         try {
             const result = await session.run(
                 `
-                MATCH (n:Entity {id: $id})
+                MATCH (n:Entity {id: $id, project: $project})
                 RETURN n LIMIT 1
                 `,
-                { id }
+                { id, project: projectId }
             );
 
             if (result.records.length === 0) {
@@ -56,6 +56,7 @@ export class Neo4jService {
     }
 
     async getEntityWithNeighbors(
+        projectId: string,
         id: string,
         limit: number = 25
     ): Promise<{
@@ -64,7 +65,7 @@ export class Neo4jService {
     } | null> {
         const session = this.driver.session();
         try {
-            const entity = await this.getEntity(id);
+            const entity = await this.getEntity(projectId, id);
             if (!entity) {
                 return null;
             }
@@ -73,7 +74,7 @@ export class Neo4jService {
 
             const outboundResult = await session.run(
                 `
-                MATCH (source:Entity {id: $id})-[rel]->(target:Entity)
+                MATCH (source:Entity {id: $id, project: $project})-[rel]->(target:Entity {project: $project})
                 RETURN source.id AS sourceId,
                        target.id AS targetId,
                        type(rel) AS type,
@@ -81,7 +82,7 @@ export class Neo4jService {
                        target AS node
                 LIMIT $limit
                 `,
-                { id, limit }
+                { id, project: projectId, limit }
             );
 
             for (const record of outboundResult.records as Neo4jRecord[]) {
@@ -107,7 +108,7 @@ export class Neo4jService {
 
             const inboundResult = await session.run(
                 `
-                MATCH (source:Entity)-[rel]->(target:Entity {id: $id})
+                MATCH (source:Entity {project: $project})-[rel]->(target:Entity {id: $id, project: $project})
                 RETURN source.id AS sourceId,
                        target.id AS targetId,
                        type(rel) AS type,
@@ -115,7 +116,7 @@ export class Neo4jService {
                        source AS node
                 LIMIT $limit
                 `,
-                { id, limit }
+                { id, project: projectId, limit }
             );
 
             for (const record of inboundResult.records as Neo4jRecord[]) {
@@ -146,6 +147,7 @@ export class Neo4jService {
     }
 
     async findEntitiesByType(
+        projectId: string,
         type: string,
         limit: number = 20
     ): Promise<GraphEntitySummary[]> {
@@ -153,12 +155,12 @@ export class Neo4jService {
         try {
             const result = await session.run(
                 `
-                MATCH (n:Entity {type: $type})
+                MATCH (n:Entity {type: $type, project: $project})
                 RETURN n
                 ORDER BY n.updatedAt DESC
                 LIMIT $limit
                 `,
-                { type, limit }
+                { project: projectId, type, limit }
             );
 
             return result.records.map((record: Neo4jRecord) =>

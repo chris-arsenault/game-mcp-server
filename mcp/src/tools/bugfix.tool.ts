@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
+import { ProjectService } from "../services/project.service.js";
 
 type RecordBugFixArgs = {
     issue: string;
@@ -49,10 +50,11 @@ export class BugFixTool {
 
     constructor(
         private qdrant: QdrantService,
-        private embedding: EmbeddingService
+        private embedding: EmbeddingService,
+        private projects: ProjectService
     ) {}
 
-    async recordBugFix(args: RecordBugFixArgs) {
+    async recordBugFix(projectId: string, args: RecordBugFixArgs) {
         const {
             issue,
             summary,
@@ -82,7 +84,7 @@ export class BugFixTool {
         const vector = await this.embedding.embed(searchCorpus);
         const id = randomUUID();
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -108,7 +110,7 @@ export class BugFixTool {
         };
     }
 
-    async matchBugFix(args: MatchBugFixArgs) {
+    async matchBugFix(projectId: string, args: MatchBugFixArgs) {
         const {
             query,
             errorMessage,
@@ -143,7 +145,7 @@ export class BugFixTool {
                 }
 
                 const errorMatches = await this.qdrant.scroll(
-                    this.collection,
+                    this.getCollection(projectId),
                     errorFilter,
                     limit
                 );
@@ -190,7 +192,7 @@ export class BugFixTool {
             : undefined;
 
         const results = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -224,9 +226,9 @@ export class BugFixTool {
         return { matches };
     }
 
-    async getBugFix(args: GetBugFixArgs) {
+    async getBugFix(projectId: string, args: GetBugFixArgs) {
         const { issue } = args;
-        const results = await this.qdrant.scroll(this.collection, {
+        const results = await this.qdrant.scroll(this.getCollection(projectId), {
             must: [
                 {
                     key: "issue",
@@ -265,5 +267,9 @@ export class BugFixTool {
                 created_at: asString(record.created_at)
             }
         };
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
     }
 }

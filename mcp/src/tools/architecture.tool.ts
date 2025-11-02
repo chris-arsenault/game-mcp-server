@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
 import { CacheService } from "../services/cache.service.js";
+import { ProjectService } from "../services/project.service.js";
 import {
     ArchitectureDecisionInput,
     ArchitectureDecisionRecord,
@@ -28,10 +29,11 @@ export class ArchitectureTool {
     constructor(
         private qdrant: QdrantService,
         private embedding: EmbeddingService,
-        private cache: CacheService
+        private cache: CacheService,
+        private projects: ProjectService
     ) {}
 
-    async storeDecision(args: ArchitectureDecisionInput & {
+    async storeDecision(projectId: string, args: ArchitectureDecisionInput & {
         status?: string;
         author?: string;
         notes?: string;
@@ -55,7 +57,7 @@ export class ArchitectureTool {
             `${decision}\n${rationale}\n${alternatives.join("\n")}\n${scope}`
         );
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -74,7 +76,7 @@ export class ArchitectureTool {
             },
         ]);
 
-        this.invalidateCaches();
+        this.invalidateCaches(projectId);
 
         return {
             success: true,
@@ -84,7 +86,7 @@ export class ArchitectureTool {
         };
     }
 
-    async queryDecisions(args: QueryArgs) {
+    async queryDecisions(projectId: string, args: QueryArgs) {
         const {
             query,
             limit = 5,
@@ -98,7 +100,7 @@ export class ArchitectureTool {
         const filter = this.buildFilter(scope, tags);
 
         const results: any[] = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -111,11 +113,11 @@ export class ArchitectureTool {
         };
     }
 
-    async getHistory(args: HistoryArgs = {}) {
+    async getHistory(projectId: string, args: HistoryArgs = {}) {
         const { limit = 20, scope, tag } = args;
         const filter = this.buildFilter(scope, tag ? [tag] : undefined);
 
-        const cacheKey = `architecture:history:${limit}:${scope ?? ""}:${tag ?? ""}`;
+        const cacheKey = `architecture:${projectId}:history:${limit}:${scope ?? ""}:${tag ?? ""}`;
         const cached = this.cache.get<ArchitectureDecisionRecord[]>(cacheKey);
         if (cached) {
             return {
@@ -206,7 +208,11 @@ export class ArchitectureTool {
         return { must };
     }
 
-    private invalidateCaches() {
-        this.cache.clearPrefix("architecture:history");
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
+    }
+
+    private invalidateCaches(projectId: string) {
+        this.cache.clearPrefix(`architecture:${projectId}:`);
     }
 }

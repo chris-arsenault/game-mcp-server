@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
 import { CacheService } from "../services/cache.service.js";
+import { ProjectService } from "../services/project.service.js";
 import { TestStrategyInput } from "../types/index.js";
 
 type QueryArgs = {
@@ -24,10 +25,11 @@ export class TestingTool {
     constructor(
         private qdrant: QdrantService,
         private embedding: EmbeddingService,
-        private cache: CacheService
+        private cache: CacheService,
+        private projects: ProjectService
     ) {}
 
-    async storeTestStrategy(args: StoreArgs) {
+    async storeTestStrategy(projectId: string, args: StoreArgs) {
         const {
             title,
             focus_area,
@@ -46,7 +48,7 @@ export class TestingTool {
             `${title}\n${focus_area}\n${scenario}\n${coverage.join("\n")}`
         );
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -65,7 +67,7 @@ export class TestingTool {
             },
         ]);
 
-        this.cache.clearPrefix("testing:list");
+        this.cache.clearPrefix(`testing:${projectId}:list`);
 
         return {
             success: true,
@@ -75,7 +77,7 @@ export class TestingTool {
         };
     }
 
-    async queryTestStrategies(args: QueryArgs) {
+    async queryTestStrategies(projectId: string, args: QueryArgs) {
         const {
             query,
             focus_area,
@@ -89,7 +91,7 @@ export class TestingTool {
         const filter = this.buildFilter({ focus_area, automated, tags });
 
         const results: any[] = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -102,13 +104,13 @@ export class TestingTool {
         };
     }
 
-    async listByFocusArea(args: { focusArea: string }) {
+    async listByFocusArea(projectId: string, args: { focusArea: string }) {
         const { focusArea } = args;
         if (!focusArea) {
             throw new Error("focusArea is required");
         }
 
-        const cacheKey = `testing:list:${focusArea}`;
+        const cacheKey = `testing:${projectId}:list:${focusArea}`;
         const cached = this.cache.get<any[]>(cacheKey);
         if (cached) {
             return {
@@ -119,7 +121,7 @@ export class TestingTool {
         }
 
         const response: any = await this.qdrant.scroll(
-            this.collection,
+            this.getCollection(projectId),
             {
                 must: [
                     {
@@ -195,5 +197,9 @@ export class TestingTool {
         }
 
         return { must };
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
     }
 }

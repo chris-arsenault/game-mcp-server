@@ -9,6 +9,7 @@ import {
 import { getBuildConfig, config as appConfig } from "../utils/config.js";
 import { logger } from "../utils/logger.js";
 import { syncRepository } from "../utils/repo.js";
+import { resolveProjectId } from "../utils/project.js";
 
 export class BuildService {
     private running = false;
@@ -31,7 +32,8 @@ export class BuildService {
         };
 
         try {
-            const buildConfig = getBuildConfig(request.mode, request.baseCommit);
+            const projectId = request.project ?? resolveProjectId(undefined);
+            const buildConfig = getBuildConfig(request.mode, projectId, request.baseCommit);
             const repoUrl = request.repoUrl ?? appConfig.repository.url;
             const branch = request.branch ?? appConfig.repository.branch;
 
@@ -108,13 +110,14 @@ export class BuildService {
         const normalizedRequest: BuildRequest = {
             ...request,
             repoUrl,
-            branch
+            branch,
+            project: resolveProjectId(request.project)
         };
 
         this.running = true;
         const startedAt = new Date().toISOString();
         logger.info(
-            `Build queued: mode=${normalizedRequest.mode}, stage=${normalizedRequest.stage ?? "all"}, repo=${repoUrl}, branch=${branch}`
+            `Build queued: mode=${normalizedRequest.mode}, stage=${normalizedRequest.stage ?? "all"}, repo=${repoUrl}, branch=${branch}, project=${normalizedRequest.project}`
         );
 
         this.currentRun = {

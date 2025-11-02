@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
+import { ProjectService } from "../services/project.service.js";
 
 type CreateBacklogArgs = {
     title: string;
@@ -19,6 +20,7 @@ type CreateBacklogArgs = {
     dependencies?: string[];
     notes?: string;
     category?: string;
+    feature_id?: string | null;
 };
 
 type UpdateBacklogArgs = Partial<CreateBacklogArgs> & {
@@ -31,6 +33,7 @@ type TagSearchArgs = {
     priority?: string;
     owner?: string;
     limit?: number;
+    feature_id?: string;
 };
 
 type SemanticSearchArgs = TagSearchArgs & {
@@ -60,6 +63,7 @@ type BacklogRecord = {
     dependencies: string[];
     notes: string | null;
     category: string | null;
+    feature_id: string | null;
     created_at: string;
     updated_at: string;
     score?: number;
@@ -70,13 +74,15 @@ export class BacklogTool {
 
     constructor(
         private qdrant: QdrantService,
-        private embedding: EmbeddingService
+        private embedding: EmbeddingService,
+        private projects: ProjectService
     ) {}
 
-    async createBacklogItem(args: CreateBacklogArgs) {
+    async createBacklogItem(projectId: string, args: CreateBacklogArgs) {
         const now = new Date().toISOString();
         const id = randomUUID();
 
+        const normalizedFeatureId = this.normalizeFeatureId(args.feature_id);
         const payload = {
             title: args.title,
             description: args.description,
@@ -93,13 +99,14 @@ export class BacklogTool {
             dependencies: args.dependencies ?? [],
             notes: args.notes ?? null,
             category: args.category ?? null,
+            feature_id: normalizedFeatureId,
             created_at: now,
             updated_at: now
         };
 
         const vector = await this.embedForItem(payload);
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -114,9 +121,9 @@ export class BacklogTool {
         };
     }
 
-    async updateBacklogItem(args: UpdateBacklogArgs) {
+    async updateBacklogItem(projectId: string, args: UpdateBacklogArgs) {
         const { id, ...updates } = args;
-        const existing = await this.fetchById(id);
+        const existing = await this.fetchById(projectId, id);
 
         if (!existing) {
             return {
@@ -135,12 +142,16 @@ export class BacklogTool {
             tags: updates.tags ?? existingData.tags,
             acceptance_criteria: updates.acceptance_criteria ?? existingData.acceptance_criteria,
             dependencies: updates.dependencies ?? existingData.dependencies,
+            feature_id:
+                Object.prototype.hasOwnProperty.call(updates, "feature_id")
+                    ? this.normalizeFeatureId(updates.feature_id)
+                    : existingData.feature_id,
             updated_at: now
         };
 
         const vector = await this.embedForItem(merged);
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -155,12 +166,12 @@ export class BacklogTool {
         };
     }
 
-    async searchBacklogByTag(args: TagSearchArgs) {
+    async searchBacklogByTag(projectId: string, args: TagSearchArgs) {
         const { tags = [], status, priority, owner, limit = 25 } = args;
-        const filter = this.buildFilter({ tags, status, priority, owner });
+        const filter = this.buildFilter({ tags, status, priority, owner, feature_id: args.feature_id });
 
         const response: any = await this.qdrant.scroll(
-            this.collection,
+            this.getCollection(projectId),
             filter,
             limit
         );
@@ -174,7 +185,7 @@ export class BacklogTool {
         };
     }
 
-    async searchBacklogSemantics(args: SemanticSearchArgs) {
+    async searchBacklogSemantics(projectId: string, args: SemanticSearchArgs) {
         const {
             query,
             tags = [],
@@ -186,10 +197,10 @@ export class BacklogTool {
         } = args;
 
         const vector = await this.embedding.embed(query);
-        const filter = this.buildFilter({ tags, status, priority, owner });
+        const filter = this.buildFilter({ tags, status, priority, owner, feature_id: args.feature_id });
 
         const results: any[] = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -202,7 +213,7 @@ export class BacklogTool {
         };
     }
 
-    async getTopBacklogItems(args: TopBacklogArgs = {}) {
+    async getTopBacklogItems(projectId: string, args: TopBacklogArgs = {}) {
         const { includeCompleted = false } = args;
         const normalizedLimit = Math.min(Math.max(1, args.limit ?? 5), 20);
 
@@ -218,7 +229,7 @@ export class BacklogTool {
               };
 
         const response: any = await this.qdrant.scroll(
-            this.collection,
+            this.getCollection(projectId),
             filter,
             normalizedLimit * 5
         );
@@ -234,6 +245,26 @@ export class BacklogTool {
             count: sorted.length,
             items: sorted
         };
+    }
+
+    async getBacklogItemsByFeature(projectId: string, featureId: string, limit: number = 200) {
+        const normalized = this.normalizeFeatureId(featureId);
+        if (!normalized) {
+            return [];
+        }
+
+        const filter = {
+            must: [
+                {
+                    key: "feature_id",
+                    match: { value: normalized }
+                }
+            ]
+        };
+
+        const response: any = await this.qdrant.scroll(this.getCollection(projectId), filter, limit);
+        const points = response.points ?? [];
+        return points.map((point: any) => this.mapPoint(point));
     }
 
     private priorityRank(priority: string): number {
@@ -253,8 +284,8 @@ export class BacklogTool {
         return 4;
     }
 
-    private async fetchById(id: string): Promise<BacklogRecord | undefined> {
-        const response = await this.qdrant.retrieve(this.collection, [id]);
+    private async fetchById(projectId: string, id: string): Promise<BacklogRecord | undefined> {
+        const response = await this.qdrant.retrieve(this.getCollection(projectId), [id]);
         const point = response?.[0];
         if (!point) {
             return undefined;
@@ -277,6 +308,7 @@ export class BacklogTool {
         status?: string;
         priority?: string;
         owner?: string;
+        feature_id?: string;
     }) {
         const must: any[] = [];
 
@@ -308,6 +340,13 @@ export class BacklogTool {
             });
         }
 
+        if (params.feature_id) {
+            must.push({
+                key: "feature_id",
+                match: { value: params.feature_id }
+            });
+        }
+
         if (must.length === 0) {
             return undefined;
         }
@@ -335,6 +374,7 @@ export class BacklogTool {
             dependencies: payload.dependencies ?? [],
             notes: payload.notes ?? null,
             category: payload.category ?? null,
+            feature_id: typeof payload.feature_id === "string" ? payload.feature_id : null,
             created_at: payload.created_at ?? "",
             updated_at: payload.updated_at ?? "",
             score: point.score
@@ -357,6 +397,7 @@ export class BacklogTool {
         dependencies: string[];
         notes: string | null;
         category: string | null;
+        feature_id: string | null;
     }) {
         const text = [
             payload.title,
@@ -371,9 +412,22 @@ export class BacklogTool {
             payload.tags.join(", "),
             payload.owner ?? "",
             payload.category ?? "",
-            payload.sprint ?? ""
+            payload.sprint ?? "",
+            payload.feature_id ?? ""
         ].join("\n\n");
 
         return await this.embedding.embed(text);
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
+    }
+
+    private normalizeFeatureId(value: unknown): string | null {
+        if (typeof value === "string") {
+            const trimmed = value.trim();
+            return trimmed.length > 0 ? trimmed : null;
+        }
+        return null;
     }
 }

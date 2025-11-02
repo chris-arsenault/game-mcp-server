@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
 import { CacheService } from "../services/cache.service.js";
+import { ProjectService } from "../services/project.service.js";
 import { DialogueSceneInput, DialogueSceneRecord } from "../types/index.js";
 
 type StoreArgs = DialogueSceneInput & {
@@ -28,10 +29,11 @@ export class DialogueTool {
     constructor(
         private qdrant: QdrantService,
         private embedding: EmbeddingService,
-        private cache: CacheService
+        private cache: CacheService,
+        private projects: ProjectService
     ) {}
 
-    async storeDialogueScene(args: StoreArgs) {
+    async storeDialogueScene(projectId: string, args: StoreArgs) {
         const {
             scene,
             characters,
@@ -53,7 +55,7 @@ export class DialogueTool {
             `${scene}\n${characters.join(",")}\n${context}\n${script}`
         );
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -71,7 +73,7 @@ export class DialogueTool {
             },
         ]);
 
-        this.cache.clearPrefix(`dialogue:scene:${scene}`);
+        this.cache.clearPrefix(`dialogue:${projectId}:scene:${scene}`);
 
         return {
             success: true,
@@ -81,7 +83,7 @@ export class DialogueTool {
         };
     }
 
-    async findDialogue(args: SearchArgs) {
+    async findDialogue(projectId: string, args: SearchArgs) {
         const {
             query,
             character,
@@ -95,7 +97,7 @@ export class DialogueTool {
         const filter = this.buildFilter({ character, tone, tags });
 
         const results: any[] = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -108,9 +110,9 @@ export class DialogueTool {
         };
     }
 
-    async getScene(args: SceneArgs) {
+    async getScene(projectId: string, args: SceneArgs) {
         const { scene_id } = args;
-        const cacheKey = `dialogue:scene:${scene_id}`;
+        const cacheKey = `dialogue:${projectId}:scene:${scene_id}`;
 
         const cached = this.cache.get<DialogueSceneRecord>(cacheKey);
         if (cached) {
@@ -121,7 +123,7 @@ export class DialogueTool {
             };
         }
 
-        const response = await this.qdrant.retrieve(this.collection, [scene_id]);
+        const response = await this.qdrant.retrieve(this.getCollection(projectId), [scene_id]);
         if (response.length === 0) {
             return {
                 found: false,
@@ -190,5 +192,9 @@ export class DialogueTool {
         }
 
         return { must };
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
     }
 }

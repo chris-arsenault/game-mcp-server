@@ -41,6 +41,43 @@ body {
   gap: 0.75rem;
 }
 
+.shell__project {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.shell__project-label {
+  font-size: 0.85rem;
+  color: #cbd5f5;
+}
+
+.shell__project-input {
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  background: #0f172a;
+  color: inherit;
+  width: 10rem;
+}
+
+.shell__project-apply {
+  background: rgba(59, 130, 246, 0.25);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.85rem;
+  color: #bfdbfe;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border 0.2s ease, background 0.2s ease;
+}
+
+.shell__project-apply:hover {
+  background: rgba(59, 130, 246, 0.4);
+  border-color: rgba(59, 130, 246, 0.6);
+}
+
 .shell__tab {
   background: rgba(59, 130, 246, 0.15);
   border: 1px solid rgba(59, 130, 246, 0.25);
@@ -691,4 +728,3 @@ body {
     align-items: stretch;
   }
 }
-*** End Patch

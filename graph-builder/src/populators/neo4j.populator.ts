@@ -20,6 +20,7 @@ export class Neo4jPopulator {
             await session.run('CREATE INDEX IF NOT EXISTS FOR (n:Entity) ON (n.id)');
             await session.run('CREATE INDEX IF NOT EXISTS FOR (n:Entity) ON (n.type)');
             await session.run('CREATE INDEX IF NOT EXISTS FOR (n:Entity) ON (n.path)');
+            await session.run('CREATE INDEX IF NOT EXISTS FOR (n:Entity) ON (n.project)');
 
             logger.info('Neo4j indexes created');
         } finally {
@@ -27,7 +28,7 @@ export class Neo4jPopulator {
         }
     }
 
-    async populateEntities(entities: EnrichedEntity[]): Promise<void> {
+    async populateEntities(projectId: string, entities: EnrichedEntity[]): Promise<void> {
         const session = this.driver.session();
 
         try {
@@ -43,7 +44,7 @@ export class Neo4jPopulator {
                     for (const entity of batch) {
                         await tx.run(
                             `
-              MERGE (e:Entity {id: $id})
+              MERGE (e:Entity {id: $id, project: $projectId})
               SET e.type = $type,
                   e.name = $name,
                   e.path = $path,
@@ -65,7 +66,8 @@ export class Neo4jPopulator {
                                 patterns: entity.patterns || [],
                                 architecturalRole: entity.architecturalRole || null,
                                 complexity: entity.complexity || null,
-                                metadata: JSON.stringify(entity.metadata)
+                                metadata: JSON.stringify(entity.metadata),
+                                projectId
                             }
                         );
                     }
@@ -81,7 +83,7 @@ export class Neo4jPopulator {
         }
     }
 
-    async populateRelationships(relationships: ParsedRelationship[]): Promise<void> {
+    async populateRelationships(projectId: string, relationships: ParsedRelationship[]): Promise<void> {
         const session = this.driver.session();
 
         try {
@@ -97,16 +99,18 @@ export class Neo4jPopulator {
                         // Create relationship with dynamic type
                         await tx.run(
                             `
-              MATCH (source:Entity {id: $sourceId})
-              MATCH (target:Entity {id: $targetId})
+              MATCH (source:Entity {id: $sourceId, project: $projectId})
+              MATCH (target:Entity {id: $targetId, project: $projectId})
               MERGE (source)-[r:\`${rel.type}\`]->(target)
               SET r.properties = $properties,
+                  r.project = $projectId,
                   r.updatedAt = datetime()
               `,
                             {
                                 sourceId: rel.source,
                                 targetId: rel.target,
-                                properties: JSON.stringify(rel.properties)
+                                properties: JSON.stringify(rel.properties),
+                                projectId
                             }
                         );
                     }
@@ -122,7 +126,7 @@ export class Neo4jPopulator {
         }
     }
 
-    async clearStaleData(currentEntityIds: string[]): Promise<void> {
+    async clearStaleData(projectId: string, currentEntityIds: string[]): Promise<void> {
         const session = this.driver.session();
 
         try {
@@ -132,10 +136,10 @@ export class Neo4jPopulator {
             await session.run(
                 `
         MATCH (e:Entity)
-        WHERE NOT e.id IN $currentIds
+        WHERE e.project = $projectId AND NOT e.id IN $currentIds
         DETACH DELETE e
         `,
-                { currentIds: currentEntityIds }
+                { currentIds: currentEntityIds, projectId }
             );
 
             logger.info('Stale data cleared');

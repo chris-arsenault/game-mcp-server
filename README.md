@@ -11,6 +11,31 @@ MCP (Model Context Protocol) server that backs the **genai-game-engine** project
 | `backlog-editor/` | Visual kanban + handoff editor that talks directly to Qdrant, offering a browser UI for PBIs and session handoff notes. |
 | `generate-image/` | Standalone STDIO MCP server that proxies OpenAI image generation and saves outputs to disk. |
 
+## Project Namespaces
+
+All persistence now lives in project-scoped Qdrant collections. A canonical project list is stored in `mcp/config/projects.json`:
+
+- Each project ID is lower-case/kebab-case (e.g. `default`, `prototype-alpha`).
+- MCP HTTP endpoints are available at `/<project>/mcp` and `/<project>/sse` (the legacy `/mcp` and `/sse` paths resolve to the default project).
+- Create a new project and its Qdrant collections with `POST /project` on the MCP server:
+
+  ```bash
+  curl -X POST http://localhost:3000/project \
+    -H 'Content-Type: application/json' \
+    -d '{"id":"prototype-alpha"}'
+  ```
+
+  The response lists the fully-qualified collection names (e.g. `prototype-alpha__research_findings`).
+
+- The backlog editor forwards the current project via the `project` query parameter or the `X-Project-Id` header (UI includes a project switcher). If omitted, it falls back to the default project defined in the shared config file.
+- The graph builder accepts an optional `project` field on `POST /build` to populate the corresponding `code_graph` namespace. When omitted the default project is used.
+- `list_qdrant_collections` returns project-specific collection names, while `get_server_metadata` advertises the project-aware HTTP templates.
+
+## Feature Management
+
+- Feature intake can be paused per project. Call `set_feature_lock { "locked": true }` to reject new `create_feature` requests (the MCP server responds with "no new features at this time") and unlock with `{ "locked": false }` when planning resumes.
+- Backlog items support an optional `feature_id` during `create_backlog_item` and `update_backlog_item`. Use `assign_backlog_to_feature` to link existing PBIs and `list_feature_backlog_items` to retrieve the feature’s work queue.
+
 ## Prerequisites
 
 - Node.js 18+
@@ -38,7 +63,7 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 1. **Initialize the session**
 
    ```bash
-   curl -i -X POST https://mcp.local.ahara.io/mcp \
+   curl -i -X POST http://localhost:3000/default/mcp \
      -H 'Content-Type: application/json' \
      -H 'Accept: application/json, text/event-stream' \
      -d '{
@@ -58,7 +83,7 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 2. **List available tools**
 
    ```bash
-   curl -i -X POST http://localhost:3000/mcp \
+   curl -i -X POST http://localhost:3000/default/mcp \
      -H 'Content-Type: application/json' \
      -H 'Accept: application/json, text/event-stream' \
      -H 'Mcp-Session-Id: d3baee33-df43-442d-a164-5675450c6860' \
@@ -74,7 +99,7 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 3. **Call a tool (example: get server metadata)**
 
    ```bash
-   curl -i -X POST http://localhost:3000/mcp \
+   curl -i -X POST http://localhost:3000/default/mcp \
      -H 'Content-Type: application/json' \
      -H 'Accept: application/json, text/event-stream' \
      -H 'Mcp-Session-Id: <SESSION_ID>' \
@@ -93,7 +118,7 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 4. **Subscribe to the SSE stream (optional)**
 
    ```bash
-   curl -N http://localhost:3000/mcp \
+   curl -N http://localhost:3000/default/sse \
      -H 'Accept: text/event-stream' \
      -H 'Mcp-Session-Id: <SESSION_ID>' \
      -H 'Mcp-Protocol-Version: 2024-11-05'
@@ -104,7 +129,7 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 5. **Terminate the session (optional cleanup)**
 
    ```bash
-   curl -i -X DELETE http://localhost:3000/mcp \
+   curl -i -X DELETE http://localhost:3000/default/mcp \
      -H 'Mcp-Session-Id: <SESSION_ID>' \
      -H 'Mcp-Protocol-Version: 2024-11-05'
    ```
@@ -114,7 +139,8 @@ The transport implements MCP’s Streamable HTTP flow. Every session starts with
 - `config/collections.json` documents every Qdrant collection, its cardinality, and which Claude agents rely on it.
 - `docs/mcp/usage.md` covers Claude integration and the full MCP tool catalog exposed by the server.
 - Bug-fix memory lives in the `bug_fix_patterns` collection and is accessible via the `record_bug_fix`, `match_bug_fix`, and `get_bug_fix` tools. Error messages can be stored alongside fixes so agents can perform exact log-line lookups before falling back to semantic matches.
-- Knowledge-graph embeddings live in the `code_graph` collection. Use `explore_graph_entity` to pull the Neo4j node plus surrounding relationships, and `search_graph_semantic` for vector search against the graph-builder output.
+- Knowledge-graph embeddings live in project-scoped collections named `<project>__code_graph`. Use `explore_graph_entity` to pull the Neo4j node plus surrounding relationships, and `search_graph_semantic` for vector search against the graph-builder output.
+- Feature definitions live in `<project>__features`; manage them with `create_feature`, `update_feature`, `list_features`, and `get_feature`, and link PBIs via `assign_backlog_to_feature` or `list_feature_backlog_items`.
 - `GET /stats` returns per-boot tool usage counters (`writes`/`reads`) for MCP endpoints.
 
 Use `list_qdrant_collections` and `get_mcp_documentation` to programmatically discover server capabilities from clients.
@@ -128,7 +154,7 @@ Set the following environment variables so the server can reach the graph-builde
 | `NEO4J_URL` | `bolt://localhost:7687` | Bolt endpoint for the Neo4j instance populated by the graph builder |
 | `NEO4J_USER` | `neo4j` | Username for Neo4j auth |
 | `NEO4J_PASSWORD` | `password` | Password for Neo4j auth |
-| `GRAPH_COLLECTION` | `code_graph` | Qdrant collection that holds graph embeddings |
+| `GRAPH_COLLECTION` | `code_graph` | Base collection name for graph embeddings (`<project>__code_graph` is created per project) |
 | `GRAPH_BUILDER_PORT` | `4100` | HTTP port for the graph-builder service |
 | `OPENAI_API_KEY` | _(required)_ | Used by the graph builder to enrich entities |
 | `OPENAI_MODEL` | `gpt-5` | Override the OpenAI model for semantic enrichment |
@@ -142,7 +168,7 @@ The graph builder clones `chris-arsenault/genai-game-engine` into `/mnt/apps/app
 
 The builder exposes a REST API on `http://<host>:${GRAPH_BUILDER_PORT}`:
 
-- `POST /build` with body `{"mode":"full|incremental","stage":"all|parse|enrich|populate","baseCommit":"...","repoUrl":"...","branch":"..."}` to start a job. `repoUrl` and `branch` default to the service configuration (see env vars above).
+- `POST /build` with body `{"mode":"full|incremental","stage":"all|parse|enrich|populate","baseCommit":"...","repoUrl":"...","branch":"...","project":"<id>"}` to start a job. `project` is optional and defaults to the configured default project. `repoUrl` and `branch` default to the service configuration (see env vars above).
 - `GET /status` to poll the current or last run summary.
 - `POST /reset` to clear staging artifacts and the incremental marker.
 
@@ -156,7 +182,8 @@ curl -s -X POST http://localhost:5346/build \
   -d '{
     "mode": "full",
     "stage": "all",
-    "branch": "main"
+    "branch": "main",
+    "project": "default"
   }'
 ```
 

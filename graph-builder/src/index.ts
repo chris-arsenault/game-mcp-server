@@ -5,6 +5,7 @@ import { config } from "./utils/config.js";
 import { resetStaging } from "./utils/reset.js";
 import { BuildRequest } from "./types/index.js";
 import { waitForDependencies } from "./utils/startup.js";
+import { resolveProjectId } from "./utils/project.js";
 
 const app = express();
 const buildService = new BuildService();
@@ -31,6 +32,18 @@ app.post("/build", async (req, res, next) => {
         const baseCommit = req.body?.baseCommit as string | undefined;
         const repoUrl = req.body?.repoUrl as string | undefined;
         const branch = req.body?.branch as string | undefined;
+        const projectRaw = req.body?.project as string | undefined;
+
+        let projectId: string;
+        try {
+            projectId = resolveProjectId(projectRaw);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return res.status(404).json({
+                success: false,
+                error: message
+            });
+        }
 
         if (!["incremental", "full"].includes(mode)) {
             return res.status(400).json({
@@ -54,7 +67,8 @@ app.post("/build", async (req, res, next) => {
             stage,
             baseCommit,
             repoUrl,
-            branch
+            branch,
+            project: projectId
         };
 
         try {

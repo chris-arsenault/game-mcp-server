@@ -8,7 +8,7 @@ A lightweight visual editor for the project backlog and handoff notes. It expose
 - **Create new PBIs** with default status/priority.
 - **Top items endpoint** to fetch the highest‑priority unfinished work.
 - **Handoff loop** with a simple textarea to fetch and overwrite the shared handoff document.
-- **Graph explorer** to inspect Neo4j nodes/relationships with force-directed visualization plus semantic search over the `code_graph` Qdrant collection.
+- **Graph explorer** to inspect Neo4j nodes/relationships with force-directed visualization plus semantic search over the `<project>__code_graph` Qdrant collection.
 - **REST API** (`/api/...`) suitable for automation or integration with other tools.
 
 ## Prerequisites
@@ -17,7 +17,7 @@ A lightweight visual editor for the project backlog and handoff notes. It expose
 - Running instances of:
   - Qdrant (default `http://localhost:6333`)
   - Embedding service exposing `POST /embed` (default `http://localhost:8080`)
-- Collections already created in Qdrant:
+- Collections already created in Qdrant (base names; actual collections are namespaced as `<project>__name`):
   - `backlog_items`
   - `handoff_notes`
 
@@ -32,10 +32,11 @@ Environment variables (optional):
 | `PORT` | `4005` | HTTP port for the Express API and static site. |
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant REST endpoint. |
 | `EMBEDDING_URL` | `http://localhost:8080` | Embedding service base URL. |
-| `BACKLOG_COLLECTION` | `backlog_items` | Qdrant collection name for backlog PBIs. |
-| `HANDOFF_COLLECTION` | `handoff_notes` | Qdrant collection name for the shared handoff document. |
+| `BACKLOG_COLLECTION` | `backlog_items` | Base collection name for backlog PBIs (actual collection is `<project>__backlog_items`). |
+| `HANDOFF_COLLECTION` | `handoff_notes` | Base collection name for the shared handoff document (`<project>__handoff_notes`). |
 | `HANDOFF_ID` | `11111111-1111-1111-1111-111111111111` | Point identifier used for the handoff note. |
-| `GRAPH_COLLECTION` | `code_graph` | Qdrant collection containing graph-builder embeddings. |
+| `GRAPH_COLLECTION` | `code_graph` | Base collection name containing graph-builder embeddings (`<project>__code_graph`). |
+| `DEFAULT_PROJECT` | `default` | Project ID to use when none is supplied via request headers/query (must exist in `mcp/config/projects.json`). |
 | `NEO4J_HTTP_URL` | `http://localhost:7474` | Base URL for Neo4j HTTP API. |
 | `NEO4J_DATABASE` | `neo4j` | Database name for Neo4j queries. |
 | `NEO4J_USER` | `neo4j` | Neo4j username. |
@@ -77,6 +78,12 @@ After `npm run build`, static assets land in `dist/client` and server bundle in 
 - `PUT /api/backlog/:id` – Update an existing item (status/priority/description, etc.).
 - `GET /api/graph/search?query=...` – Semantic search over graph-builder embeddings (returns candidate node IDs).
 - `GET /api/graph/entity?id=...&depth=1` – Fetch a node plus its neighborhood up to the requested depth with nodes and relationships ready for visualization.
+
+Every endpoint accepts a `project` query parameter or `X-Project-Id` header to select the namespace. If omitted, the API uses the default project from the shared config file.
+
+## Project Selector
+
+The React shell exposes an inline project switcher in the header. Updating the project regenerates the URL’s `?project=` parameter and persists the selection in `localStorage`, so subsequent API calls (and page loads) stay within the chosen namespace. You can also change the project manually by editing the query string or sending the header mentioned above.
 
 The React client uses these routes via relative `/api/...` requests, so the proxy works automatically in dev/production.
 

@@ -2,16 +2,18 @@ import { randomUUID } from "crypto";
 
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
+import { ProjectService } from "../services/project.service.js";
 
 export class ResearchTool {
     private collection = "research_findings";
 
     constructor(
         private qdrant: QdrantService,
-        private embedding: EmbeddingService
+        private embedding: EmbeddingService,
+        private projects: ProjectService
     ) {}
 
-    async cacheResearch(args: {
+    async cacheResearch(projectId: string, args: {
         topic: string;
         findings: string;
         sources?: string[];
@@ -27,7 +29,7 @@ export class ResearchTool {
         const id = randomUUID();
         const timestamp = new Date().toISOString();
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -49,7 +51,7 @@ export class ResearchTool {
         };
     }
 
-    async queryResearch(args: {
+    async queryResearch(projectId: string, args: {
         query: string;
         limit?: number;
         min_score?: number;
@@ -59,7 +61,7 @@ export class ResearchTool {
         const vector = await this.embedding.embed(query);
 
         const results = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             undefined,
@@ -98,13 +100,13 @@ export class ResearchTool {
         };
     }
 
-    async checkExists(args: { topic: string }) {
+    async checkExists(projectId: string, args: { topic: string }) {
         const { topic } = args;
 
         const vector = await this.embedding.embed(topic);
 
         const results = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             1,
             undefined,
@@ -125,5 +127,9 @@ export class ResearchTool {
             exists: false,
             message: "No existing research found - proceed with new research"
         };
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
     }
 }

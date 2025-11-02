@@ -1,6 +1,7 @@
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
 import { CacheService } from "../services/cache.service.js";
+import { ProjectService } from "../services/project.service.js";
 import { ValidationSummary, ValidationMatch } from "../types/index.js";
 
 type ValidateArgs = {
@@ -24,10 +25,11 @@ export class ValidationTool {
     constructor(
         private qdrant: QdrantService,
         private embedding: EmbeddingService,
-        private cache: CacheService
+        private cache: CacheService,
+        private projects: ProjectService
     ) {}
 
-    async validatePatterns(args: ValidateArgs): Promise<ValidationSummary> {
+    async validatePatterns(projectId: string, args: ValidateArgs): Promise<ValidationSummary> {
         const {
             content,
             type,
@@ -50,7 +52,7 @@ export class ValidationTool {
             : undefined;
 
         const points: any[] = await this.qdrant.search(
-            this.patternCollection,
+            this.getPatternCollection(projectId),
             vector,
             limit,
             filter,
@@ -75,7 +77,7 @@ export class ValidationTool {
         };
     }
 
-    async checkConsistency(args: ConsistencyArgs): Promise<ValidationSummary> {
+    async checkConsistency(projectId: string, args: ConsistencyArgs): Promise<ValidationSummary> {
         const {
             description,
             category,
@@ -96,7 +98,7 @@ export class ValidationTool {
             : undefined;
 
         const architecturePoints: any[] = await this.qdrant.search(
-            this.architectureCollection,
+            this.getArchitectureCollection(projectId),
             vector,
             limit,
             filter,
@@ -104,7 +106,7 @@ export class ValidationTool {
         );
 
         const patternPoints: any[] = await this.qdrant.search(
-            this.patternCollection,
+            this.getPatternCollection(projectId),
             vector,
             Math.max(3, Math.floor(limit / 2)),
             filter,
@@ -197,6 +199,14 @@ export class ValidationTool {
         }
 
         return recommendations;
+    }
+
+    private getPatternCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.patternCollection);
+    }
+
+    private getArchitectureCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.architectureCollection);
     }
 
     private formatScore(score: number) {

@@ -2,16 +2,18 @@ import { randomUUID } from "crypto";
 
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
+import { ProjectService } from "../services/project.service.js";
 
 export class PatternTool {
     private collection = "code_implementations";
 
     constructor(
         private qdrant: QdrantService,
-        private embedding: EmbeddingService
+        private embedding: EmbeddingService,
+        private projects: ProjectService
     ) {}
 
-    async storePattern(args: {
+    async storePattern(projectId: string, args: {
         name: string;
         description: string;
         code: string;
@@ -26,7 +28,7 @@ export class PatternTool {
 
         const id = randomUUID();
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -50,7 +52,7 @@ export class PatternTool {
         };
     }
 
-    async findSimilar(args: {
+    async findSimilar(projectId: string, args: {
         description: string;
         category?: string;
         limit?: number;
@@ -71,7 +73,7 @@ export class PatternTool {
             : undefined;
 
         const results = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -94,10 +96,10 @@ export class PatternTool {
         };
     }
 
-    async getByName(args: { name: string }) {
+    async getByName(projectId: string, args: { name: string }) {
         const { name } = args;
 
-        const results = await this.qdrant.scroll(this.collection, {
+        const results = await this.qdrant.scroll(this.getCollection(projectId), {
             must: [
                 {
                     key: "name",
@@ -131,5 +133,9 @@ export class PatternTool {
                 category: pattern.category
             }
         };
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
     }
 }

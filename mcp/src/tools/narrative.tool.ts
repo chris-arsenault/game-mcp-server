@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
 import { CacheService } from "../services/cache.service.js";
+import { ProjectService } from "../services/project.service.js";
 import {
     NarrativeElementInput,
     NarrativeElementRecord,
@@ -36,10 +37,11 @@ export class NarrativeTool {
     constructor(
         private qdrant: QdrantService,
         private embedding: EmbeddingService,
-        private cache: CacheService
+        private cache: CacheService,
+        private projects: ProjectService
     ) {}
 
-    async storeNarrativeElement(args: StoreArgs) {
+    async storeNarrativeElement(projectId: string, args: StoreArgs) {
         const {
             title,
             type,
@@ -62,7 +64,7 @@ export class NarrativeTool {
             `${title}\n${type}\n${summary}\n${details}\n${tags.join(",")}`
         );
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -85,7 +87,7 @@ export class NarrativeTool {
             },
         ]);
 
-        this.cache.clearPrefix("narrative:outline");
+        this.cache.clearPrefix(`narrative:${projectId}:outline`);
 
         return {
             success: true,
@@ -96,7 +98,7 @@ export class NarrativeTool {
         };
     }
 
-    async searchNarrativeElements(args: SearchArgs) {
+    async searchNarrativeElements(projectId: string, args: SearchArgs) {
         const {
             query,
             type,
@@ -109,7 +111,7 @@ export class NarrativeTool {
         const filter = this.buildFilter({ type, tags });
 
         const results: any[] = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -122,7 +124,7 @@ export class NarrativeTool {
         };
     }
 
-    async getNarrativeOutline(args: OutlineArgs = {}) {
+    async getNarrativeOutline(projectId: string, args: OutlineArgs = {}) {
         const {
             act,
             chapter,
@@ -131,7 +133,7 @@ export class NarrativeTool {
             order = "asc",
         } = args;
 
-        const cacheKey = `narrative:outline:${act ?? ""}:${chapter ?? ""}:${type ?? ""}:${limit}:${order}`;
+        const cacheKey = `narrative:${projectId}:outline:${act ?? ""}:${chapter ?? ""}:${type ?? ""}:${limit}:${order}`;
         const cached = this.cache.get<NarrativeElementRecord[]>(cacheKey);
         if (cached) {
             return {
@@ -143,7 +145,7 @@ export class NarrativeTool {
 
         const filter = this.buildFilter({ type, act, chapter });
         const response: any = await this.qdrant.scroll(
-            this.collection,
+            this.getCollection(projectId),
             filter,
             limit
         );
@@ -249,5 +251,9 @@ export class NarrativeTool {
         }
 
         return { must };
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
     }
 }

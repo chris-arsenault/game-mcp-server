@@ -30,11 +30,12 @@ export const config = {
     }
 };
 
-export function getBuildConfig(mode: 'incremental' | 'full', baseCommit?: string): BuildConfig {
+export function getBuildConfig(mode: 'incremental' | 'full', projectId: string, baseCommit?: string): BuildConfig {
     return {
         repoPath: config.repoPath,
         stagingPath: config.stagingPath,
         mode,
+        projectId,
         baseCommit
     };
 }

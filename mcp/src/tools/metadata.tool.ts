@@ -3,6 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { CacheService } from "../services/cache.service.js";
+import { ProjectService } from "../services/project.service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,9 +23,12 @@ async function readFileSafe(filePath: string): Promise<string | null> {
 }
 
 export class MetadataTool {
-    constructor(private cache: CacheService) {}
+    constructor(private cache: CacheService, private projects: ProjectService) {}
 
     async getServerMetadata() {
+        const projects = this.projects.listProjects();
+        const defaultProject = this.projects.getDefaultProject();
+        const lockedProjects = projects.filter((project) => this.projects.isFeatureCreationLocked(project));
         return {
             name: "game-dev-mcp",
             version: "1.0.0",
@@ -33,7 +37,13 @@ export class MetadataTool {
                 qdrant: process.env.QDRANT_URL || "http://qdrant:6333",
                 embeddings: process.env.EMBEDDING_URL || "http://embedding-service:80"
             },
-            collections_endpoint: "/collections",
+            projects: {
+                default: defaultProject,
+                available: projects,
+                feature_locks: lockedProjects,
+                mcpEndpointTemplate: "/{project}/mcp",
+                sseEndpointTemplate: "/{project}/sse"
+            },
             documentation_tool: "get_mcp_documentation",
             tool_discovery: "list_qdrant_collections",
             environment: {
@@ -43,8 +53,8 @@ export class MetadataTool {
         };
     }
 
-    async listCollections() {
-        const cacheKey = "metadata:collections";
+    async listCollections(projectId: string) {
+        const cacheKey = `metadata:collections:${projectId}`;
         const cached = this.cache.get<any>(cacheKey);
         if (cached) {
             return {
@@ -57,6 +67,7 @@ export class MetadataTool {
         if (!raw) {
             const payload = {
                 source: "missing",
+                project: projectId,
                 message: "collections.json not found",
                 collections: []
             };
@@ -65,10 +76,24 @@ export class MetadataTool {
         }
 
         const parsed = JSON.parse(raw);
+        const definitions = Array.isArray(parsed.collections) ? parsed.collections : [];
+
+        const projectCollections = this.projects.getProjectCollections(projectId);
 
         const payload = {
             source: "file",
-            collections: parsed.collections ?? []
+            project: projectId,
+            collections: projectCollections.map(({ baseName, name, definition }) => ({
+                baseName,
+                name,
+                description: definition.description ?? null,
+                dimension: definition.dimension,
+                distance: definition.distance,
+                onDiskPayload: definition.onDiskPayload ?? false,
+                optimizersConfig: definition.optimizersConfig ?? null,
+                primaryAgents: definition.primaryAgents ?? []
+            })),
+            definitions
         };
 
         this.cache.set(cacheKey, payload, 30 * 60 * 1000);

@@ -1,5 +1,17 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 
+type Distance =
+    | "Cosine"
+    | "Euclid"
+    | "Dot";
+
+export interface CollectionOptions {
+    size: number;
+    distance: Distance;
+    onDiskPayload?: boolean;
+    optimizersConfig?: Record<string, unknown>;
+}
+
 export class QdrantService {
     private client: QdrantClient;
 
@@ -60,5 +72,32 @@ export class QdrantService {
             payload,
             points: [id]
         });
+    }
+
+    async listCollections() {
+        return await this.client.getCollections();
+    }
+
+    async ensureCollection(name: string, options: CollectionOptions) {
+        try {
+            await this.client.getCollection(name);
+            return { created: false };
+        } catch (error: any) {
+            const status = typeof error?.status === "number" ? error.status : error?.response?.status;
+            if (status !== 404) {
+                throw error;
+            }
+        }
+
+        await this.client.createCollection(name, {
+            vectors: {
+                size: options.size,
+                distance: options.distance
+            },
+            on_disk_payload: options.onDiskPayload,
+            optimizers_config: options.optimizersConfig
+        });
+
+        return { created: true };
     }
 }

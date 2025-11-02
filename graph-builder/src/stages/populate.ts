@@ -20,20 +20,20 @@ export class PopulateStage {
 
         // Initialize databases
         await this.neo4j.initialize();
-        await this.qdrant.initialize();
+        await this.qdrant.initialize(config.projectId);
 
         // Populate Neo4j
-        await this.neo4j.populateEntities(enrichOutput.entities);
-        await this.neo4j.populateRelationships(enrichOutput.relationships);
+        await this.neo4j.populateEntities(config.projectId, enrichOutput.entities);
+        await this.neo4j.populateRelationships(config.projectId, enrichOutput.relationships);
 
         // Clear stale data (only in incremental mode)
         if (config.mode === 'incremental') {
             const currentIds = enrichOutput.entities.map(e => e.id);
-            await this.neo4j.clearStaleData(currentIds);
+            await this.neo4j.clearStaleData(config.projectId, currentIds);
         }
 
         // Populate Qdrant
-        await this.qdrant.populateEntities(enrichOutput.entities);
+        await this.qdrant.populateEntities(config.projectId, enrichOutput.entities);
 
         // Cleanup
         await this.neo4j.close();

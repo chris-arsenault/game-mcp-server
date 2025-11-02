@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { QdrantService } from "../services/qdrant.service.js";
 import { EmbeddingService } from "../services/embedding.service.js";
 import { CacheService } from "../services/cache.service.js";
+import { ProjectService } from "../services/project.service.js";
 import { LoreEntryInput, LoreEntryRecord } from "../types/index.js";
 
 type StoreArgs = LoreEntryInput & {
@@ -30,10 +31,11 @@ export class WorldbuildingTool {
     constructor(
         private qdrant: QdrantService,
         private embedding: EmbeddingService,
-        private cache: CacheService
+        private cache: CacheService,
+        private projects: ProjectService
     ) {}
 
-    async storeLoreEntry(args: StoreArgs) {
+    async storeLoreEntry(projectId: string, args: StoreArgs) {
         const {
             title,
             category,
@@ -53,7 +55,7 @@ export class WorldbuildingTool {
             `${title}\n${category}\n${content}\n${region ?? ""}\n${tags.join(",")}`
         );
 
-        await this.qdrant.upsert(this.collection, [
+        await this.qdrant.upsert(this.getCollection(projectId), [
             {
                 id,
                 vector,
@@ -73,7 +75,7 @@ export class WorldbuildingTool {
             },
         ]);
 
-        this.cache.clearPrefix("world:lore");
+        this.cache.clearPrefix(`world:${projectId}:lore`);
 
         return {
             success: true,
@@ -83,7 +85,7 @@ export class WorldbuildingTool {
         };
     }
 
-    async searchLore(args: SearchArgs) {
+    async searchLore(projectId: string, args: SearchArgs) {
         const {
             query,
             category,
@@ -97,7 +99,7 @@ export class WorldbuildingTool {
         const filter = this.buildFilter({ category, region, tags });
 
         const results: any[] = await this.qdrant.search(
-            this.collection,
+            this.getCollection(projectId),
             vector,
             limit,
             filter,
@@ -110,10 +112,10 @@ export class WorldbuildingTool {
         };
     }
 
-    async listLore(args: ListArgs = {}) {
+    async listLore(projectId: string, args: ListArgs = {}) {
         const { region, category, limit = 50 } = args;
 
-        const cacheKey = `world:lore:${region ?? ""}:${category ?? ""}:${limit}`;
+        const cacheKey = `world:${projectId}:lore:${region ?? ""}:${category ?? ""}:${limit}`;
         const cached = this.cache.get<LoreEntryRecord[]>(cacheKey);
         if (cached) {
             return {
@@ -125,7 +127,7 @@ export class WorldbuildingTool {
 
         const filter = this.buildFilter({ region, category });
         const response: any = await this.qdrant.scroll(
-            this.collection,
+            this.getCollection(projectId),
             filter,
             limit
         );
@@ -211,5 +213,9 @@ export class WorldbuildingTool {
         }
 
         return { must };
+    }
+
+    private getCollection(projectId: string) {
+        return this.projects.collectionName(projectId, this.collection);
     }
 }

@@ -2,6 +2,7 @@ export interface BuildConfig {
     repoPath: string;
     stagingPath: string;
     mode: 'incremental' | 'full';
+    projectId: string;
     baseCommit?: string;
 }
 
@@ -69,6 +70,7 @@ export interface BuildRequest {
     baseCommit?: string;
     repoUrl?: string;
     branch?: string;
+    project?: string;
 }
 
 export interface BuildStageSummary {

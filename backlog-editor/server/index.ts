@@ -3,7 +3,9 @@ import express from "express";
 import cors from "cors";
 import path from "node:path";
 import fs from "node:fs";
+import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import axios from "axios";
 
 import { QdrantService } from "./services/qdrant.service.js";
@@ -16,11 +18,12 @@ app.use(express.json({ limit: "4mb" }));
 const PORT = Number(process.env.PORT ?? 4005);
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://localhost:6333";
 const EMBEDDING_URL = process.env.EMBEDDING_URL ?? "http://localhost:8080";
-const BACKLOG_COLLECTION = process.env.BACKLOG_COLLECTION ?? "backlog_items";
-const HANDOFF_COLLECTION = process.env.HANDOFF_COLLECTION ?? "handoff_notes";
+const BACKLOG_COLLECTION_BASE = process.env.BACKLOG_COLLECTION ?? "backlog_items";
+const HANDOFF_COLLECTION_BASE = process.env.HANDOFF_COLLECTION ?? "handoff_notes";
 const HANDOFF_ID =
   process.env.HANDOFF_ID ?? "11111111-1111-1111-1111-111111111111";
-const GRAPH_COLLECTION = process.env.GRAPH_COLLECTION ?? "code_graph";
+const GRAPH_COLLECTION_BASE = process.env.GRAPH_COLLECTION ?? "code_graph";
+const DEFAULT_PROJECT_FALLBACK = process.env.DEFAULT_PROJECT ?? "default";
 const NEO4J_HTTP_URL = process.env.NEO4J_HTTP_URL ?? "http://localhost:7474";
 const NEO4J_DATABASE = process.env.NEO4J_DATABASE ?? "neo4j";
 const NEO4J_USER = process.env.NEO4J_USER ?? "neo4j";
@@ -31,6 +34,11 @@ const GRAPH_MAX_DEPTH = Math.max(1, Number(process.env.GRAPH_MAX_DEPTH ?? 3));
 
 const qdrant = new QdrantService(QDRANT_URL);
 const embedding = new EmbeddingService(EMBEDDING_URL);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PROJECT_CONFIG_PATH = path.resolve(__dirname, "../../mcp/config/projects.json");
+const PROJECT_CONFIG_TTL_MS = 30_000;
 
 type BacklogItem = {
   id: string;
@@ -87,9 +95,112 @@ type GraphSearchResult = {
   properties: Record<string, unknown>;
 };
 
-app.get("/api/handoff", async (_req, res) => {
+type ProjectContext = {
+  id: string;
+  backlogCollection: string;
+  handoffCollection: string;
+  graphCollection: string;
+};
+
+type ProjectConfig = {
+  defaultProject: string;
+  projects: string[];
+};
+
+let projectConfigCache: { value: ProjectConfig; loadedAt: number } | undefined;
+
+const normalizeProjectId = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const collectionName = (projectId: string, base: string): string =>
+  `${projectId}__${base}`;
+
+async function loadProjectConfig(): Promise<ProjectConfig> {
+  if (
+    projectConfigCache &&
+    Date.now() - projectConfigCache.loadedAt < PROJECT_CONFIG_TTL_MS
+  ) {
+    return projectConfigCache.value;
+  }
+
   try {
-    const response = await qdrant.retrieve(HANDOFF_COLLECTION, [HANDOFF_ID]);
+    const raw = await readFile(PROJECT_CONFIG_PATH, "utf8");
+    const parsed = JSON.parse(raw) as Partial<ProjectConfig>;
+    const defaultProject = parsed.defaultProject
+      ? normalizeProjectId(parsed.defaultProject)
+      : normalizeProjectId(DEFAULT_PROJECT_FALLBACK);
+    const projects = new Set<string>(
+      Array.isArray(parsed.projects)
+        ? parsed.projects
+            .map(project => normalizeProjectId(project))
+            .filter(Boolean)
+        : []
+    );
+    projects.add(defaultProject);
+
+    const config: ProjectConfig = {
+      defaultProject,
+      projects: Array.from(projects.values())
+    };
+    projectConfigCache = { value: config, loadedAt: Date.now() };
+    return config;
+  } catch (error) {
+    console.warn(
+      "[backlog-editor] Failed to load project config, falling back to default project",
+      error instanceof Error ? error.message : String(error)
+    );
+    const fallback = normalizeProjectId(DEFAULT_PROJECT_FALLBACK);
+    const config: ProjectConfig = {
+      defaultProject: fallback,
+      projects: [fallback]
+    };
+    projectConfigCache = { value: config, loadedAt: Date.now() };
+    return config;
+  }
+}
+
+async function resolveProjectContext(
+  req: express.Request,
+  res: express.Response
+): Promise<ProjectContext | undefined> {
+  const config = await loadProjectConfig();
+  const requested =
+    typeof req.query.project === "string"
+      ? req.query.project
+      : typeof req.header("x-project-id") === "string"
+        ? (req.header("x-project-id") as string)
+        : undefined;
+
+  const candidate = requested ? normalizeProjectId(requested) : config.defaultProject;
+
+  if (!config.projects.includes(candidate)) {
+    res.status(404).json({
+      error: `Unknown project '${requested ?? candidate}'`,
+      available: config.projects
+    });
+    return undefined;
+  }
+
+  return {
+    id: candidate,
+    backlogCollection: collectionName(candidate, BACKLOG_COLLECTION_BASE),
+    handoffCollection: collectionName(candidate, HANDOFF_COLLECTION_BASE),
+    graphCollection: collectionName(candidate, GRAPH_COLLECTION_BASE)
+  };
+}
+
+app.get("/api/handoff", async (req, res) => {
+  try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
+    const response = await qdrant.retrieve(project.handoffCollection, [HANDOFF_ID]);
     const point = response?.[0];
     const payload = point?.payload ?? {};
     const data: HandoffResult = {
@@ -106,6 +217,10 @@ app.get("/api/handoff", async (_req, res) => {
 
 app.put("/api/handoff", async (req, res) => {
   try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
     const { content, updated_by } = req.body as {
       content: string;
       updated_by?: string;
@@ -115,7 +230,7 @@ app.put("/api/handoff", async (req, res) => {
     const vector = await embedding.embed(trimmed || "handoff");
     const now = new Date().toISOString();
 
-    await qdrant.upsert(HANDOFF_COLLECTION, [
+    await qdrant.upsert(project.handoffCollection, [
       {
         id: HANDOFF_ID,
         vector,
@@ -140,9 +255,13 @@ app.put("/api/handoff", async (req, res) => {
   }
 });
 
-app.get("/api/backlog", async (_req, res) => {
+app.get("/api/backlog", async (req, res) => {
   try {
-    const response = await qdrant.scroll(BACKLOG_COLLECTION, undefined, 200);
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
+    const response = await qdrant.scroll(project.backlogCollection, undefined, 200);
     const items = mapPoints(response.points ?? []);
     res.json({ data: items });
   } catch (error) {
@@ -153,6 +272,10 @@ app.get("/api/backlog", async (_req, res) => {
 
 app.get("/api/backlog/top", async (req, res) => {
   try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
     const limit = Math.min(Math.max(Number(req.query.limit ?? 5), 1), 20);
     const includeCompleted = req.query.includeCompleted === "true";
 
@@ -168,7 +291,7 @@ app.get("/api/backlog/top", async (req, res) => {
         };
 
     const response = await qdrant.scroll(
-      BACKLOG_COLLECTION,
+      project.backlogCollection,
       filter,
       limit * 5
     );
@@ -186,6 +309,10 @@ app.get("/api/backlog/top", async (req, res) => {
 
 app.post("/api/backlog", async (req, res) => {
   try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
     const {
       title,
       description,
@@ -223,7 +350,7 @@ app.post("/api/backlog", async (req, res) => {
 
     const vector = await embedBacklog(payload);
 
-    await qdrant.upsert(BACKLOG_COLLECTION, [
+    await qdrant.upsert(project.backlogCollection, [
       {
         id,
         vector,
@@ -245,10 +372,14 @@ app.post("/api/backlog", async (req, res) => {
 
 app.put("/api/backlog/:id", async (req, res) => {
   try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
     const id = req.params.id;
     const updates = req.body as Partial<BacklogItem>;
 
-    const existing = await fetchBacklogById(id);
+    const existing = await fetchBacklogById(project, id);
     if (!existing) {
       return res.status(404).json({ error: "Backlog item not found" });
     }
@@ -266,7 +397,7 @@ app.put("/api/backlog/:id", async (req, res) => {
       ? await embedBacklog(merged)
       : await embedBacklog(existing);
 
-    await qdrant.upsert(BACKLOG_COLLECTION, [
+    await qdrant.upsert(project.backlogCollection, [
       {
         id,
         vector,
@@ -291,8 +422,12 @@ app.get("/api/graph/search", async (req, res) => {
   }
 
   try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
     const vector = await embedding.embed(query);
-    const results = await qdrant.search(GRAPH_COLLECTION, vector, limit, undefined, undefined);
+    const results = await qdrant.search(project.graphCollection, vector, limit, undefined, undefined);
     const mapped = (results ?? []).map(mapGraphSearchResult);
     res.json({ data: mapped });
   } catch (error) {
@@ -323,6 +458,10 @@ app.get("/api/graph/entity", async (req, res) => {
   `;
 
   try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
     const rows = await runCypher(statement, { id: identifier });
     if (rows.length === 0) {
       return res.status(404).json({ error: "Graph entity not found" });
@@ -413,8 +552,8 @@ function mapPoint(point: any): BacklogItem | undefined {
   };
 }
 
-async function fetchBacklogById(id: string): Promise<BacklogItem | undefined> {
-  const response = await qdrant.retrieve(BACKLOG_COLLECTION, [id]);
+async function fetchBacklogById(project: ProjectContext, id: string): Promise<BacklogItem | undefined> {
+  const response = await qdrant.retrieve(project.backlogCollection, [id]);
   return mapPoint(response?.[0]);
 }
 
