@@ -1733,7 +1733,11 @@ export class GameDevMCPServer {
 
         app.post("/reset", async (req, res) => {
             const rawId = typeof req.body?.id === "string" ? req.body.id : "";
+            const snapshotFlag = req.body?.snapshot;
+            const snapshotEnabled = snapshotFlag === undefined ? true : Boolean(snapshotFlag);
+
             if (!rawId || rawId.trim().length === 0) {
+                console.warn("[MCP] Project reset rejected: missing project id", { body: req.body });
                 return res.status(400).json({ error: "Project id is required" });
             }
 
@@ -1741,8 +1745,17 @@ export class GameDevMCPServer {
             try {
                 projectId = this.projectService.requireProject(rawId);
             } catch (error) {
+                console.warn("[MCP] Project reset rejected: unknown project", {
+                    requested: rawId,
+                    error: error instanceof Error ? error.message : String(error)
+                });
                 return res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
             }
+
+            console.info("[MCP] Project reset requested", {
+                projectId,
+                snapshot: snapshotEnabled
+            });
 
             try {
                 const result = await snapshotAndResetProject({
@@ -1750,19 +1763,24 @@ export class GameDevMCPServer {
                     snapshotDir: this.snapshotDir,
                     qdrant: this.qdrant,
                     projects: this.projectService,
-                    neo4j: this.neo4j
+                    neo4j: this.neo4j,
+                    snapshot: snapshotEnabled
                 });
 
                 res.status(202).json({
                     success: true,
                     project: projectId,
                     snapshot_path: result.snapshotPath,
-                    message: `Project '${projectId}' reset with snapshot ${result.timestamp}`
+                    snapshot: snapshotEnabled,
+                    message: snapshotEnabled
+                        ? `Project '${projectId}' reset with snapshot ${result.timestamp}`
+                        : `Project '${projectId}' reset without snapshot`
                 });
             } catch (error) {
                 console.error("[MCP] Project reset failed", {
                     projectId,
-                    error: error instanceof Error ? error.message : String(error)
+                    snapshot: snapshotEnabled,
+                    error: error instanceof Error ? error.stack ?? error.message : String(error)
                 });
                 res.status(500).json({
                     success: false,
