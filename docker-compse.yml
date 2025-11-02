@@ -16,6 +16,7 @@ services:
     volumes:
       - /mnt/apps/apps/mcp-server/game-mcp-server/mcp/config:/app/config
       - /mnt/apps/apps/mcp-server/game-mcp-server/mcp/config:/app/mcp/config
+      - /mnt/apps/apps/mcp-server/snapshots:/app/snapshots
     restart: unless-stopped
 
   graph-builder:

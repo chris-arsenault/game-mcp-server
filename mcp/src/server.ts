@@ -8,6 +8,7 @@ import {
 import express, { Request, Response, NextFunction } from "express";
 import { Server as HttpServer, IncomingMessage, ServerResponse } from "http";
 import { randomUUID } from "crypto";
+import path from "node:path";
 import { QdrantService } from "./services/qdrant.service.js";
 import { EmbeddingService } from "./services/embedding.service.js";
 import { CacheService } from "./services/cache.service.js";
@@ -28,6 +29,7 @@ import { GraphTool } from "./tools/graph.tool.js";
 import { HandoffTool } from "./tools/handoff.tool.js";
 import { BacklogTool } from "./tools/backlog.tool.js";
 import { FeatureTool } from "./tools/feature.tool.js";
+import { snapshotAndResetProject } from "./utils/projectReset.js";
 
 type ToolHandler = (args: Record<string, unknown>, context: ToolExecutionContext) => Promise<unknown>;
 
@@ -55,6 +57,7 @@ export class GameDevMCPServer {
     private projectStates: Map<string, ProjectTransportState>;
     private sessionProjectMap: Map<string, string>;
     private toolStats: Map<string, { writes: number; reads: number }>;
+    private snapshotDir: string;
     private readonly writeTools = new Set<string>([
         "cache_research",
         "store_pattern",
@@ -138,6 +141,7 @@ export class GameDevMCPServer {
         this.projectStates = new Map();
         this.sessionProjectMap = new Map();
         this.toolStats = new Map();
+        this.snapshotDir = path.resolve(process.env.SNAPSHOT_DIR || path.join(process.cwd(), "snapshots"));
 
         // Initialize tools
         this.tools = new Map();
@@ -1724,6 +1728,46 @@ export class GameDevMCPServer {
                     error: error instanceof Error ? error.message : String(error)
                 });
                 res.status(500).json({ error: "Failed to create project" });
+            }
+        });
+
+        app.post("/reset", async (req, res) => {
+            const rawId = typeof req.body?.id === "string" ? req.body.id : "";
+            if (!rawId || rawId.trim().length === 0) {
+                return res.status(400).json({ error: "Project id is required" });
+            }
+
+            let projectId: string;
+            try {
+                projectId = this.projectService.requireProject(rawId);
+            } catch (error) {
+                return res.status(404).json({ error: error instanceof Error ? error.message : String(error) });
+            }
+
+            try {
+                const result = await snapshotAndResetProject({
+                    projectId,
+                    snapshotDir: this.snapshotDir,
+                    qdrant: this.qdrant,
+                    projects: this.projectService,
+                    neo4j: this.neo4j
+                });
+
+                res.status(202).json({
+                    success: true,
+                    project: projectId,
+                    snapshot_path: result.snapshotPath,
+                    message: `Project '${projectId}' reset with snapshot ${result.timestamp}`
+                });
+            } catch (error) {
+                console.error("[MCP] Project reset failed", {
+                    projectId,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                res.status(500).json({
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error)
+                });
             }
         });
 

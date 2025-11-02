@@ -20,9 +20,9 @@ All persistence now lives in project-scoped Qdrant collections. A canonical proj
 - Create a new project and its Qdrant collections with `POST /project` on the MCP server:
 
   ```bash
-  curl -X POST http://localhost:3000/project \
+  curl -X POST http://localhost:5356/project \
     -H 'Content-Type: application/json' \
-    -d '{"id":"prototype-alpha"}'
+    -d '{"id":"glass"}'
   ```
 
   The response lists the fully-qualified collection names (e.g. `prototype-alpha__research_findings`).
@@ -30,6 +30,7 @@ All persistence now lives in project-scoped Qdrant collections. A canonical proj
 - The backlog editor forwards the current project via the `project` query parameter or the `X-Project-Id` header (UI includes a project switcher). If omitted, it falls back to the default project defined in the shared config file.
 - The graph builder accepts an optional `project` field on `POST /build` to populate the corresponding `code_graph` namespace. When omitted the default project is used.
 - `list_qdrant_collections` returns project-specific collection names, while `get_server_metadata` advertises the project-aware HTTP templates.
+- Use `POST /reset` with body `{ "id": "<project>" }` to snapshot the project's Qdrant collections and Neo4j entities to `/app/snapshots/<project>/<timestamp>/`, then clear them so the project starts fresh.
 
 ## Feature Management
 
@@ -155,6 +156,8 @@ Set the following environment variables so the server can reach the graph-builde
 | `NEO4J_USER` | `neo4j` | Username for Neo4j auth |
 | `NEO4J_PASSWORD` | `password` | Password for Neo4j auth |
 | `GRAPH_COLLECTION` | `code_graph` | Base collection name for graph embeddings (`<project>__code_graph` is created per project) |
+| `DEFAULT_PROJECT` | `memory` | Initial namespace used when clients omit `project` |
+| `SNAPSHOT_DIR` | `./snapshots` | Directory where `POST /reset` writes archives (mounted to the host in Docker compose) |
 | `GRAPH_BUILDER_PORT` | `4100` | HTTP port for the graph-builder service |
 | `OPENAI_API_KEY` | _(required)_ | Used by the graph builder to enrich entities |
 | `OPENAI_MODEL` | `gpt-5` | Override the OpenAI model for semantic enrichment |

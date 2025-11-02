@@ -100,4 +100,15 @@ export class QdrantService {
 
         return { created: true };
     }
+
+    async deleteCollection(name: string) {
+        try {
+            await this.client.deleteCollection(name);
+        } catch (error: any) {
+            const status = typeof error?.status === "number" ? error.status : error?.response?.status;
+            if (status && status !== 404) {
+                throw error;
+            }
+        }
+    }
 }

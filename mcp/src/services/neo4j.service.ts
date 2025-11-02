@@ -175,6 +175,65 @@ export class Neo4jService {
         await this.driver.close();
     }
 
+    async snapshotProject(projectId: string) {
+        const session = this.driver.session();
+        try {
+            const nodesResult = await session.run(
+                `
+                MATCH (n:Entity {project: $project})
+                RETURN n
+                `,
+                { project: projectId }
+            );
+
+            const relationshipsResult = await session.run(
+                `
+                MATCH (source:Entity {project: $project})-[r]->(target:Entity {project: $project})
+                RETURN source.id AS sourceId,
+                       target.id AS targetId,
+                       type(r) AS type,
+                       properties(r) AS properties
+                `,
+                { project: projectId }
+            );
+
+            const nodes = nodesResult.records.map((record: Neo4jRecord) => {
+                const node = record.get("n") as neo4j.Node;
+                return {
+                    id: node.properties.id,
+                    labels: node.labels,
+                    properties: node.properties
+                };
+            });
+
+            const relationships = relationshipsResult.records.map((record: Neo4jRecord) => ({
+                type: record.get("type") as string,
+                sourceId: record.get("sourceId") as string,
+                targetId: record.get("targetId") as string,
+                properties: record.get("properties") as Record<string, unknown>
+            }));
+
+            return { nodes, relationships };
+        } finally {
+            await session.close();
+        }
+    }
+
+    async clearProject(projectId: string) {
+        const session = this.driver.session();
+        try {
+            await session.run(
+                `
+                MATCH (n:Entity {project: $project})
+                DETACH DELETE n
+                `,
+                { project: projectId }
+            );
+        } finally {
+            await session.close();
+        }
+    }
+
     private mapNode(node: neo4j.Node): GraphEntitySummary {
         const properties = node.properties ?? {};
         const type =
