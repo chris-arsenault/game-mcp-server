@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, type DragEvent } from "react";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { apiRequest, formatTimestamp } from "../utils/api.js";
 
 type BacklogItem = {
@@ -67,6 +69,7 @@ export default function BacklogBoard() {
   const [handoffAuthor, setHandoffAuthor] = useState("");
   const [loadingBacklog, setLoadingBacklog] = useState(true);
   const [loadingHandoff, setLoadingHandoff] = useState(true);
+  const [handoffView, setHandoffView] = useState<"preview" | "raw">("preview");
   const [features, setFeatures] = useState<Feature[]>([]);
   const [loadingFeatures, setLoadingFeatures] = useState(true);
   const [isSavingFeatureOrder, setIsSavingFeatureOrder] = useState(false);
@@ -105,6 +108,8 @@ export default function BacklogBoard() {
       const result = await apiRequest<ApiResponse<HandoffPayload>>("/api/handoff");
       setHandoff(result.data);
       setHandoffDraft(result.data.content ?? "");
+      setHandoffAuthor("");
+      setHandoffView("preview");
     } catch (err) {
       console.error(err);
       setError("Failed to load handoff notes");
@@ -185,6 +190,7 @@ export default function BacklogBoard() {
       });
       setHandoff(response.data);
       setError(null);
+      setHandoffView("preview");
     } catch (err) {
       console.error(err);
       setError("Failed to save handoff notes");
@@ -192,6 +198,21 @@ export default function BacklogBoard() {
       setIsSavingHandoff(false);
     }
   }
+
+  function handleCancelHandoffEdit() {
+    setHandoffDraft(handoff.content ?? "");
+    setHandoffAuthor("");
+    setHandoffView("preview");
+  }
+
+  const renderedHandoff = useMemo(() => {
+    const source = handoffDraft ?? "";
+    const html = marked.parse(source);
+    if (typeof window === "undefined") {
+      return html;
+    }
+    return DOMPurify.sanitize(html);
+  }, [handoffDraft]);
 
   function normalizeFeatureList(list: Feature[]): Feature[] {
     const cleaned = list.map(feature => {
@@ -370,31 +391,78 @@ export default function BacklogBoard() {
 
       <section className="handoff">
         <div className="handoff__header">
-          <h3>Session Handoff Notes</h3>
-          <div className="handoff__meta">
-            <span>Last updated: {formatTimestamp(handoff.updated_at)}</span>
-            {handoff.updated_by && <span> by {handoff.updated_by}</span>}
+          <div>
+            <h3>Session Handoff Notes</h3>
+            <div className="handoff__meta">
+              <span>Last updated: {formatTimestamp(handoff.updated_at)}</span>
+              {handoff.updated_by && <span> by {handoff.updated_by}</span>}
+            </div>
+          </div>
+          <div className="handoff__toolbar">
+            {handoffView === "preview" ? (
+              <button
+                className="handoff__toggle"
+                onClick={() => setHandoffView("raw")}
+                disabled={loadingHandoff}
+              >
+                Edit Markdown
+              </button>
+            ) : (
+              <>
+                <button
+                  className="handoff__toggle"
+                  onClick={() => setHandoffView("preview")}
+                  disabled={isSavingHandoff}
+                >
+                  Preview
+                </button>
+                <button
+                  className="handoff__toggle handoff__toggle--secondary"
+                  onClick={() => handleCancelHandoffEdit()}
+                  disabled={isSavingHandoff}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
           </div>
         </div>
-        <textarea
-          className="handoff__textarea"
-          value={handoffDraft}
-          onChange={event => setHandoffDraft(event.target.value)}
-          placeholder="Describe the current state, blockers, next steps, etc."
-          rows={8}
-        />
-        <div className="handoff__actions">
-          <input
-            className="handoff__author"
-            type="text"
-            value={handoffAuthor}
-            onChange={event => setHandoffAuthor(event.target.value)}
-            placeholder="Updated by (optional)"
-          />
-          <button onClick={() => void handleSaveHandoff()} disabled={isSavingHandoff}>
-            {isSavingHandoff ? "Saving…" : "Save Handoff"}
-          </button>
-        </div>
+        {handoffView === "preview" ? (
+          <div className="handoff__preview">
+            {handoffDraft.trim().length > 0 ? (
+              <div
+                className="handoff__preview-content"
+                dangerouslySetInnerHTML={{ __html: renderedHandoff }}
+              />
+            ) : (
+              <p className="handoff__placeholder">
+                No handoff notes yet. Click "Edit Markdown" to add context and next steps.
+              </p>
+            )}
+          </div>
+        ) : (
+          <>
+            <textarea
+              className="handoff__textarea"
+              value={handoffDraft}
+              onChange={event => setHandoffDraft(event.target.value)}
+              placeholder="Describe the current state, blockers, next steps, etc."
+              rows={8}
+            />
+            <div className="handoff__actions">
+              <input
+                className="handoff__author"
+                type="text"
+                value={handoffAuthor}
+                onChange={event => setHandoffAuthor(event.target.value)}
+                placeholder="Updated by (optional)"
+              />
+              <button onClick={() => void handleSaveHandoff()} disabled={isSavingHandoff}>
+                {isSavingHandoff ? "Saving…" : "Save Handoff"}
+              </button>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="features">

@@ -201,6 +201,44 @@ body {
   color: #cbd5f5;
 }
 
+.handoff__toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.handoff__toggle {
+  background: rgba(59, 130, 246, 0.25);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  border-radius: 0.6rem;
+  padding: 0.45rem 0.85rem;
+  font-weight: 600;
+  color: #bfdbfe;
+  cursor: pointer;
+  transition: background 0.2s ease, border 0.2s ease;
+}
+
+.handoff__toggle:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.45);
+  border-color: rgba(59, 130, 246, 0.7);
+}
+
+.handoff__toggle:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.handoff__toggle--secondary {
+  background: rgba(148, 163, 184, 0.2);
+  border-color: rgba(148, 163, 184, 0.4);
+  color: #e2e8f0;
+}
+
+.handoff__toggle--secondary:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.35);
+  border-color: rgba(148, 163, 184, 0.6);
+}
+
 .handoff__textarea {
   width: 100%;
   border: 1px solid #334155;
@@ -240,6 +278,81 @@ body {
 .handoff__actions button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.handoff__preview {
+  border: 1px solid #334155;
+  border-radius: 0.75rem;
+  padding: 1.1rem;
+  background: #0f172a;
+  min-height: 8rem;
+  overflow-x: auto;
+}
+
+.handoff__preview-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #e2e8f0;
+}
+
+.handoff__preview-content h1,
+.handoff__preview-content h2,
+.handoff__preview-content h3,
+.handoff__preview-content h4,
+.handoff__preview-content h5,
+.handoff__preview-content h6 {
+  margin: 0;
+  font-weight: 600;
+  color: #bfdbfe;
+}
+
+.handoff__preview-content ul,
+.handoff__preview-content ol {
+  padding-left: 1.25rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.handoff__preview-content code {
+  font-family: "Fira Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  background: rgba(148, 163, 184, 0.18);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.handoff__preview-content pre {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 0.65rem;
+  padding: 0.85rem;
+  overflow-x: auto;
+}
+
+.handoff__preview-content pre code {
+  background: none;
+  padding: 0;
+}
+
+.handoff__preview-content blockquote {
+  margin: 0;
+  padding-left: 0.85rem;
+  border-left: 3px solid rgba(96, 165, 250, 0.6);
+  color: #cbd5f5;
+  font-style: italic;
+}
+
+.handoff__placeholder {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #94a3b8;
+  font-style: italic;
 }
 
 .features {
