@@ -473,7 +473,7 @@ app.put("/api/features/order", async (req, res) => {
     }
 
     const now = new Date().toISOString();
-    const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+    const updates: Array<{ id: string; priority: number; updated_at: string }> = [];
     const ordered: FeatureRecord[] = [];
 
     ids.forEach((id, index) => {
@@ -485,16 +485,24 @@ app.put("/api/features/order", async (req, res) => {
         updated_at: feature.priority === newPriority ? feature.updated_at : now
       };
       ordered.push(updated);
-      if (feature.priority !== newPriority) {
+      if (feature.priority !== newPriority || feature.updated_at !== updated.updated_at) {
         updates.push({
           id,
-          payload: featureRecordToPayload(updated)
+          priority: newPriority,
+          updated_at: updated.updated_at
         });
       }
     });
 
     if (updates.length > 0) {
-      await qdrant.upsert(project.featureCollection, updates);
+      await Promise.all(
+        updates.map(update =>
+          qdrant.setPayload(project.featureCollection, update.id, {
+            priority: update.priority,
+            updated_at: update.updated_at
+          })
+        )
+      );
     }
 
     res.json({ data: sortFeatures(ordered) });
@@ -697,19 +705,6 @@ function featureTimestamp(value?: string | null): number {
   }
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
-}
-
-function featureRecordToPayload(feature: FeatureRecord): Record<string, unknown> {
-  return {
-    name: feature.name,
-    description: feature.description,
-    tags: feature.tags,
-    status: feature.status,
-    owner: feature.owner,
-    priority: feature.priority,
-    created_at: feature.created_at,
-    updated_at: feature.updated_at
-  };
 }
 
 function mapPoint(point: any): BacklogItem | undefined {

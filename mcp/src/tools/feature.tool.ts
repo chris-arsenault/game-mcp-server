@@ -128,13 +128,21 @@ export class FeatureTool {
             ? await this.embedFeature(merged.name, merged.description ?? "")
             : undefined;
 
-        await this.qdrant.upsert(this.getCollection(normalizedProject), [
-            {
-                id: args.id,
-                payload: merged,
-                ...(vector ? { vector } : {})
-            }
-        ]);
+        if (vector) {
+            await this.qdrant.upsert(this.getCollection(normalizedProject), [
+                {
+                    id: args.id,
+                    vector,
+                    payload: merged
+                }
+            ]);
+        } else {
+            await this.qdrant.setPayload(
+                this.getCollection(normalizedProject),
+                args.id,
+                this.buildFeaturePayload(merged)
+            );
+        }
 
         if (priority !== existing.priority) {
             await this.normalizeFeaturePriorities(normalizedProject);
@@ -359,7 +367,7 @@ export class FeatureTool {
         const sorted = this.sortFeaturesByPriority(mapped);
         const now = new Date().toISOString();
 
-        const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+        const updates: Array<{ id: string; priority: number }> = [];
         const normalized = sorted.map((feature, index) => {
             const desiredPriority = index + 1;
             if (feature.priority === desiredPriority) {
@@ -372,13 +380,20 @@ export class FeatureTool {
             };
             updates.push({
                 id: feature.id,
-                payload: this.buildFeaturePayload(updatedFeature)
+                priority: desiredPriority
             });
             return updatedFeature;
         });
 
         if (updates.length > 0) {
-            await this.qdrant.upsert(this.getCollection(projectId), updates);
+            await Promise.all(
+                updates.map((update) =>
+                    this.qdrant.setPayload(this.getCollection(projectId), update.id, {
+                        priority: update.priority,
+                        updated_at: now
+                    })
+                )
+            );
         }
 
         return normalized;

@@ -48,4 +48,11 @@ export class QdrantService {
       with_vector: false
     });
   }
+
+  async setPayload(collection: string, id: string, payload: Record<string, unknown>) {
+    return await this.client.setPayload(collection, {
+      payload,
+      points: [id]
+    });
+  }
 }
