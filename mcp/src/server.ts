@@ -926,7 +926,8 @@ export class GameDevMCPServer {
                             description: { type: "string", description: "Optional narrative or outcome statement." },
                             tags: { type: "array", items: { type: "string" }, description: "Optional labels for planning queries." },
                             status: { type: "string", description: "Lifecycle state (e.g., proposed, in-progress, delivered)." },
-                            owner: { type: "string", description: "Optional directly responsible individual." }
+                            owner: { type: "string", description: "Optional directly responsible individual." },
+                            priority: { type: "number", description: "Optional numeric rank (1 = highest priority). Lower numbers sort first." }
                         },
                         required: ["name"],
                         additionalProperties: false
@@ -943,7 +944,8 @@ export class GameDevMCPServer {
                             description: { type: "string" },
                             tags: { type: "array", items: { type: "string" } },
                             status: { type: "string" },
-                            owner: { type: "string" }
+                            owner: { type: "string" },
+                            priority: { type: "number", description: "Numeric rank (1 = highest priority). Lower numbers sort first." }
                         },
                         required: ["id"],
                         additionalProperties: false

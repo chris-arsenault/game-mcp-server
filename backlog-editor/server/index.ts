@@ -19,6 +19,7 @@ const PORT = Number(process.env.PORT ?? 4005);
 const QDRANT_URL = process.env.QDRANT_URL ?? "http://localhost:6333";
 const EMBEDDING_URL = process.env.EMBEDDING_URL ?? "http://localhost:8080";
 const BACKLOG_COLLECTION_BASE = process.env.BACKLOG_COLLECTION ?? "backlog_items";
+const FEATURE_COLLECTION_BASE = process.env.FEATURE_COLLECTION ?? "features";
 const HANDOFF_COLLECTION_BASE = process.env.HANDOFF_COLLECTION ?? "handoff_notes";
 const HANDOFF_ID =
   process.env.HANDOFF_ID ?? "11111111-1111-1111-1111-111111111111";
@@ -61,6 +62,18 @@ type BacklogItem = {
   updated_at: string;
 };
 
+type FeatureRecord = {
+  id: string;
+  name: string;
+  description: string | null;
+  tags: string[];
+  status: string | null;
+  owner: string | null;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+};
+
 type HandoffResult = {
   content: string;
   updated_by: string | null;
@@ -98,6 +111,7 @@ type GraphSearchResult = {
 type ProjectContext = {
   id: string;
   backlogCollection: string;
+  featureCollection: string;
   handoffCollection: string;
   graphCollection: string;
 };
@@ -189,6 +203,7 @@ async function resolveProjectContext(
   return {
     id: candidate,
     backlogCollection: collectionName(candidate, BACKLOG_COLLECTION_BASE),
+    featureCollection: collectionName(candidate, FEATURE_COLLECTION_BASE),
     handoffCollection: collectionName(candidate, HANDOFF_COLLECTION_BASE),
     graphCollection: collectionName(candidate, GRAPH_COLLECTION_BASE)
   };
@@ -412,6 +427,83 @@ app.put("/api/backlog/:id", async (req, res) => {
   }
 });
 
+app.get("/api/features", async (req, res) => {
+  try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
+    const features = await fetchAllFeatures(project);
+    res.json({ data: features });
+  } catch (error) {
+    console.error("Failed to fetch features:", error);
+    res.status(500).json({ error: "Failed to fetch features" });
+  }
+});
+
+app.put("/api/features/order", async (req, res) => {
+  try {
+    const project = await resolveProjectContext(req, res);
+    if (!project) {
+      return;
+    }
+
+    const body = req.body as { ids?: unknown };
+    const idsRaw = Array.isArray(body.ids) ? body.ids : null;
+    if (!idsRaw || idsRaw.some(id => typeof id !== "string" || id.trim().length === 0)) {
+      return res.status(400).json({ error: "ids must be an array of feature identifiers" });
+    }
+    const ids = (idsRaw as string[]).map(id => id.trim());
+    if (new Set(ids).size !== ids.length) {
+      return res.status(400).json({ error: "ids must not contain duplicates" });
+    }
+
+    const features = await fetchAllFeatures(project);
+    if (features.length === 0) {
+      return res.json({ data: [] });
+    }
+    if (ids.length !== features.length) {
+      return res.status(400).json({ error: "ids must include every feature exactly once" });
+    }
+
+    const featureMap = new Map(features.map(feature => [feature.id, feature]));
+    const unknown = ids.filter(id => !featureMap.has(id));
+    if (unknown.length > 0) {
+      return res.status(400).json({ error: `Unknown feature ids: ${unknown.join(", ")}` });
+    }
+
+    const now = new Date().toISOString();
+    const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+    const ordered: FeatureRecord[] = [];
+
+    ids.forEach((id, index) => {
+      const feature = featureMap.get(id)!;
+      const newPriority = index + 1;
+      const updated: FeatureRecord = {
+        ...feature,
+        priority: newPriority,
+        updated_at: feature.priority === newPriority ? feature.updated_at : now
+      };
+      ordered.push(updated);
+      if (feature.priority !== newPriority) {
+        updates.push({
+          id,
+          payload: featureRecordToPayload(updated)
+        });
+      }
+    });
+
+    if (updates.length > 0) {
+      await qdrant.upsert(project.featureCollection, updates);
+    }
+
+    res.json({ data: sortFeatures(ordered) });
+  } catch (error) {
+    console.error("Failed to reorder features:", error);
+    res.status(500).json({ error: "Failed to reorder features" });
+  }
+});
+
 app.get("/api/graph/search", async (req, res) => {
   const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
   const limitParam = Number(req.query.limit ?? 12);
@@ -523,6 +615,101 @@ app.listen(PORT, () => {
 
 function mapPoints(points: any[]): BacklogItem[] {
   return points.map(point => mapPoint(point)).filter(Boolean) as BacklogItem[];
+}
+
+async function fetchAllFeatures(project: ProjectContext): Promise<FeatureRecord[]> {
+  const features: FeatureRecord[] = [];
+  let offset: any = undefined;
+  const pageSize = 200;
+
+  do {
+    const response = await qdrant.scroll(project.featureCollection, undefined, pageSize, offset);
+    const points = Array.isArray(response?.points) ? response.points : [];
+    for (const point of points) {
+      const mapped = mapFeaturePoint(point);
+      if (mapped) {
+        features.push(mapped);
+      }
+    }
+    offset = response?.next_page_offset;
+  } while (offset);
+
+  return sortFeatures(features);
+}
+
+function mapFeaturePoint(point: any): FeatureRecord | undefined {
+  if (!point) return undefined;
+  const payload = point.payload ?? {};
+  const id = typeof point.id === "string" ? point.id : String(point.id);
+
+  const tagsRaw = Array.isArray(payload.tags) ? payload.tags : [];
+  const tags = tagsRaw.filter((value: unknown): value is string => typeof value === "string");
+
+  return {
+    id,
+    name: typeof payload.name === "string" ? payload.name : id,
+    description: typeof payload.description === "string" ? payload.description : null,
+    tags,
+    status: typeof payload.status === "string" ? payload.status : null,
+    owner: typeof payload.owner === "string" ? payload.owner : null,
+    priority: normalizeFeaturePriority(payload.priority),
+    created_at: typeof payload.created_at === "string" ? payload.created_at : "",
+    updated_at: typeof payload.updated_at === "string" ? payload.updated_at : ""
+  };
+}
+
+function normalizeFeaturePriority(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const normalized = Math.floor(value);
+    if (normalized >= 1) {
+      return normalized;
+    }
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      const normalized = Math.floor(numeric);
+      if (normalized >= 1) {
+        return normalized;
+      }
+    }
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function sortFeatures(features: FeatureRecord[]): FeatureRecord[] {
+  return [...features].sort((a, b) => {
+    if (a.priority !== b.priority) {
+      return a.priority - b.priority;
+    }
+    const aTime = featureTimestamp(a.created_at);
+    const bTime = featureTimestamp(b.created_at);
+    if (aTime !== bTime) {
+      return aTime - bTime;
+    }
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function featureTimestamp(value?: string | null): number {
+  if (!value) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
+}
+
+function featureRecordToPayload(feature: FeatureRecord): Record<string, unknown> {
+  return {
+    name: feature.name,
+    description: feature.description,
+    tags: feature.tags,
+    status: feature.status,
+    owner: feature.owner,
+    priority: feature.priority,
+    created_at: feature.created_at,
+    updated_at: feature.updated_at
+  };
 }
 
 function mapPoint(point: any): BacklogItem | undefined {

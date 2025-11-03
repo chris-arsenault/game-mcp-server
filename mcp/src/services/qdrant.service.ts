@@ -44,12 +44,13 @@ export class QdrantService {
         });
     }
 
-    async scroll(collection: string, filter?: any, limit: number = 100) {
+    async scroll(collection: string, filter?: any, limit: number = 100, offset?: any) {
         return await this.client.scroll(collection, {
             filter,
             limit,
             with_payload: true,
-            with_vector: false
+            with_vector: false,
+            offset
         });
     }
 

@@ -29,7 +29,7 @@ All persistence now lives in project-scoped Qdrant collections. A canonical proj
   ```bash
   curl -v -X POST http://localhost:5356/reset \
     -H 'Content-Type: application/json' \
-    -d '{"id":"glass"}'
+    -d '{"id":"glass","snapshot":false}'
   ```
 curl -X POST "http://localhost:6333/collections/glass__backlog_items/points/delete?wait=true" \
   -H "Content-Type: application/json" \

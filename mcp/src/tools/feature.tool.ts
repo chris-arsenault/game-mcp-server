@@ -11,6 +11,7 @@ interface CreateFeatureArgs {
     tags?: string[];
     status?: string;
     owner?: string;
+    priority?: number;
 }
 
 interface UpdateFeatureArgs extends Partial<CreateFeatureArgs> {
@@ -38,6 +39,7 @@ interface FeatureRecord {
     owner: string | null;
     created_at: string;
     updated_at: string;
+    priority: number;
     score?: number;
 }
 
@@ -59,12 +61,16 @@ export class FeatureTool {
 
         const id = randomUUID();
         const now = new Date().toISOString();
+        const requestedPriority = this.parsePriority(args.priority);
+        const priority = requestedPriority ?? (await this.getNextPriority(normalizedProject));
+
         const payload = {
             name: args.name.trim(),
             description: (args.description ?? "").trim() || null,
             tags: Array.isArray(args.tags) ? args.tags : [],
             status: args.status ?? "proposed",
             owner: args.owner ?? null,
+            priority,
             created_at: now,
             updated_at: now
         };
@@ -78,6 +84,8 @@ export class FeatureTool {
                 payload
             }
         ]);
+
+        await this.normalizeFeaturePriorities(normalizedProject);
 
         return {
             success: true,
@@ -97,6 +105,11 @@ export class FeatureTool {
         }
 
         const now = new Date().toISOString();
+        const priority =
+            args.priority !== undefined
+                ? this.parsePriority(args.priority) ?? existing.priority
+                : existing.priority;
+
         const merged = {
             ...existing,
             name: args.name ? args.name.trim() : existing.name,
@@ -105,6 +118,7 @@ export class FeatureTool {
             tags: Array.isArray(args.tags) ? args.tags : existing.tags,
             status: args.status ?? existing.status,
             owner: args.owner ?? existing.owner,
+            priority,
             updated_at: now,
             created_at: existing.created_at
         };
@@ -122,6 +136,10 @@ export class FeatureTool {
             }
         ]);
 
+        if (priority !== existing.priority) {
+            await this.normalizeFeaturePriorities(normalizedProject);
+        }
+
         return {
             success: true,
             id: args.id,
@@ -133,6 +151,9 @@ export class FeatureTool {
         const normalizedProject = this.projects.requireProject(projectId);
         const limit = Math.min(Math.max(args.limit ?? 25, 1), 100);
 
+        const normalizedFeatures = await this.normalizeFeaturePriorities(normalizedProject);
+        const filteredFeatures = this.applyFeatureFilters(normalizedFeatures, args.tags, args.status);
+
         if (args.query && args.query.trim().length > 0) {
             const vector = await this.embedding.embed(args.query.trim());
             const filter = this.buildFeatureFilter(args.tags, args.status);
@@ -143,29 +164,50 @@ export class FeatureTool {
                 filter,
                 0.55
             );
+            const featureIndex = new Map(filteredFeatures.map((feature) => [feature.id, feature]));
+            const mapped = results
+                .map((result: any) => {
+                    const id = typeof result.id === "string" ? result.id : String(result.id);
+                    const base = featureIndex.get(id);
+                    if (!base) {
+                        return this.mapFeature(result.payload ?? {}, id, result.score);
+                    }
+                    return {
+                        ...base,
+                        score: typeof result.score === "number" ? result.score : base.score
+                    };
+                })
+                .filter((feature): feature is FeatureRecord => Boolean(feature));
+            const ordered = this.sortFeaturesByPriority(mapped).slice(0, limit);
             return {
-                count: results.length,
-                features: results.map((result: any) => this.mapFeature(result.payload ?? {}, result.id, result.score))
+                count: ordered.length,
+                features: ordered
             };
         }
 
-        const filter = this.buildFeatureFilter(args.tags, args.status);
-        const response: any = await this.qdrant.scroll(this.getCollection(normalizedProject), filter, limit);
-        const points = response.points ?? [];
+        const ordered = filteredFeatures.slice(0, limit);
         return {
-            count: points.length,
-            features: points.map((point: any) => this.mapFeature(point.payload ?? {}, point.id, point.score))
+            count: ordered.length,
+            features: ordered
         };
     }
 
     async getFeature(projectId: string, args: { id: string }) {
         const normalizedProject = this.projects.requireProject(projectId);
-        const feature = await this.fetchFeature(normalizedProject, args.id);
+        let feature = await this.fetchFeature(normalizedProject, args.id);
         if (!feature) {
             return {
                 found: false,
                 message: `Feature '${args.id}' not found`
             };
+        }
+
+        if (feature.priority >= Number.MAX_SAFE_INTEGER) {
+            const normalized = await this.normalizeFeaturePriorities(normalizedProject);
+            const updated = normalized.find((entry) => entry.id === feature!.id);
+            if (updated) {
+                feature = updated;
+            }
         }
 
         return {
@@ -273,6 +315,8 @@ export class FeatureTool {
 
     private mapFeature(payload: any, idRaw: unknown, score?: number): FeatureRecord {
         const id = typeof idRaw === "string" ? idRaw : String(idRaw);
+        const created = typeof payload.created_at === "string" ? payload.created_at : "";
+        const updated = typeof payload.updated_at === "string" ? payload.updated_at : "";
         return {
             id,
             name: typeof payload.name === "string" ? payload.name : id,
@@ -280,10 +324,162 @@ export class FeatureTool {
             tags: Array.isArray(payload.tags) ? payload.tags : [],
             status: typeof payload.status === "string" ? payload.status : null,
             owner: typeof payload.owner === "string" ? payload.owner : null,
-            created_at: typeof payload.created_at === "string" ? payload.created_at : "",
-            updated_at: typeof payload.updated_at === "string" ? payload.updated_at : "",
+            created_at: created,
+            updated_at: updated,
+            priority: this.normalizePriority(payload.priority),
             score
         };
+    }
+
+    private async fetchAllFeaturePoints(projectId: string, filter?: any) {
+        const collection = this.getCollection(projectId);
+        const results: any[] = [];
+        let offset: any = undefined;
+        const pageSize = 200;
+
+        do {
+            const response: any = await this.qdrant.scroll(collection, filter, pageSize, offset);
+            const points = Array.isArray(response?.points) ? response.points : [];
+            if (points.length > 0) {
+                results.push(...points);
+            }
+            offset = response?.next_page_offset;
+        } while (offset);
+
+        return results;
+    }
+
+    private async normalizeFeaturePriorities(projectId: string): Promise<FeatureRecord[]> {
+        const points = await this.fetchAllFeaturePoints(projectId);
+        if (points.length === 0) {
+            return [];
+        }
+
+        const mapped = points.map((point: any) => this.mapFeature(point.payload ?? {}, point.id, point.score));
+        const sorted = this.sortFeaturesByPriority(mapped);
+        const now = new Date().toISOString();
+
+        const updates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+        const normalized = sorted.map((feature, index) => {
+            const desiredPriority = index + 1;
+            if (feature.priority === desiredPriority) {
+                return feature;
+            }
+            const updatedFeature: FeatureRecord = {
+                ...feature,
+                priority: desiredPriority,
+                updated_at: now
+            };
+            updates.push({
+                id: feature.id,
+                payload: this.buildFeaturePayload(updatedFeature)
+            });
+            return updatedFeature;
+        });
+
+        if (updates.length > 0) {
+            await this.qdrant.upsert(this.getCollection(projectId), updates);
+        }
+
+        return normalized;
+    }
+
+    private applyFeatureFilters(features: FeatureRecord[], tags?: unknown, status?: string): FeatureRecord[] {
+        let filtered = features;
+
+        if (Array.isArray(tags) && tags.length > 0) {
+            const normalizedTags = tags
+                .filter((value): value is string => typeof value === "string")
+                .map((tag) => tag.trim().toLowerCase())
+                .filter((tag) => tag.length > 0);
+
+            if (normalizedTags.length > 0) {
+                filtered = filtered.filter((feature) => {
+                    const featureTags = new Set(
+                        feature.tags
+                            .filter((value): value is string => typeof value === "string")
+                            .map((tag) => tag.trim().toLowerCase())
+                    );
+                    return normalizedTags.some((tag) => featureTags.has(tag));
+                });
+            }
+        }
+
+        if (status && status.trim().length > 0) {
+            const normalizedStatus = status.trim().toLowerCase();
+            filtered = filtered.filter((feature) => (feature.status ?? "").toLowerCase() === normalizedStatus);
+        }
+
+        return filtered;
+    }
+
+    private buildFeaturePayload(feature: FeatureRecord): Record<string, unknown> {
+        return {
+            name: feature.name,
+            description: feature.description ?? null,
+            tags: Array.isArray(feature.tags) ? feature.tags : [],
+            status: feature.status ?? null,
+            owner: feature.owner ?? null,
+            priority: feature.priority,
+            created_at: feature.created_at,
+            updated_at: feature.updated_at
+        };
+    }
+
+    private sortFeaturesByPriority(features: FeatureRecord[]): FeatureRecord[] {
+        return [...features].sort((a, b) => {
+            if (a.priority !== b.priority) {
+                return a.priority - b.priority;
+            }
+
+            const aTime = this.toTimestamp(a.created_at);
+            const bTime = this.toTimestamp(b.created_at);
+            if (aTime !== bTime) {
+                return aTime - bTime;
+            }
+
+            return a.id.localeCompare(b.id);
+        });
+    }
+
+    private toTimestamp(value?: string | null): number {
+        if (!value) {
+            return Number.MAX_SAFE_INTEGER;
+        }
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
+    }
+
+    private parsePriority(value: unknown): number | undefined {
+        if (typeof value === "number" && Number.isFinite(value)) {
+            const normalized = Math.floor(value);
+            return normalized >= 1 ? normalized : undefined;
+        }
+        if (typeof value === "string" && value.trim().length > 0) {
+            const numeric = Number(value);
+            if (Number.isFinite(numeric)) {
+                const normalized = Math.floor(numeric);
+                return normalized >= 1 ? normalized : undefined;
+            }
+        }
+        return undefined;
+    }
+
+    private normalizePriority(value: unknown): number {
+        const parsed = this.parsePriority(value);
+        return parsed ?? Number.MAX_SAFE_INTEGER;
+    }
+
+    private async getNextPriority(projectId: string) {
+        const points = await this.fetchAllFeaturePoints(projectId);
+        let max = 0;
+        for (const point of points) {
+            const value = this.parsePriority(point?.payload?.priority);
+            if (value && value > max) {
+                max = value;
+            }
+        }
+        return max + 1;
     }
 
     private async embedFeature(name: string, description: string) {

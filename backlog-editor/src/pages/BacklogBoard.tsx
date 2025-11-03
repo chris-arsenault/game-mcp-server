@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 import { apiRequest, formatTimestamp } from "../utils/api.js";
 
 type BacklogItem = {
@@ -18,6 +18,18 @@ type BacklogItem = {
   dependencies: string[];
   notes: string | null;
   category: string | null;
+  updated_at: string;
+  created_at: string;
+};
+
+type Feature = {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string | null;
+  owner: string | null;
+  tags: string[];
+  priority: number;
   updated_at: string;
   created_at: string;
 };
@@ -55,6 +67,10 @@ export default function BacklogBoard() {
   const [handoffAuthor, setHandoffAuthor] = useState("");
   const [loadingBacklog, setLoadingBacklog] = useState(true);
   const [loadingHandoff, setLoadingHandoff] = useState(true);
+  const [features, setFeatures] = useState<Feature[]>([]);
+  const [loadingFeatures, setLoadingFeatures] = useState(true);
+  const [isSavingFeatureOrder, setIsSavingFeatureOrder] = useState(false);
+  const [draggingFeatureId, setDraggingFeatureId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSavingHandoff, setIsSavingHandoff] = useState(false);
   const [newItem, setNewItem] = useState({
@@ -67,6 +83,7 @@ export default function BacklogBoard() {
   useEffect(() => {
     void loadBacklog();
     void loadHandoff();
+    void loadFeatures();
   }, []);
 
   async function loadBacklog() {
@@ -93,6 +110,19 @@ export default function BacklogBoard() {
       setError("Failed to load handoff notes");
     } finally {
       setLoadingHandoff(false);
+    }
+  }
+
+  async function loadFeatures() {
+    try {
+      setLoadingFeatures(true);
+      const result = await apiRequest<ApiResponse<Feature[]>>("/api/features");
+      setFeatures(normalizeFeatureList(result.data ?? []));
+    } catch (err) {
+      console.error(err);
+      setError("Failed to load features");
+    } finally {
+      setLoadingFeatures(false);
     }
   }
 
@@ -161,6 +191,126 @@ export default function BacklogBoard() {
     } finally {
       setIsSavingHandoff(false);
     }
+  }
+
+  function normalizeFeatureList(list: Feature[]): Feature[] {
+    const cleaned = list.map(feature => {
+      const numeric = Number.isFinite(feature.priority)
+        ? Math.max(1, Math.floor(feature.priority))
+        : 0;
+      return {
+        ...feature,
+        priority: numeric > 0 ? numeric : Number.MAX_SAFE_INTEGER
+      };
+    });
+
+    const sorted = cleaned.sort((a, b) => {
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority;
+      }
+      const aTime = Date.parse(a.created_at ?? "") || 0;
+      const bTime = Date.parse(b.created_at ?? "") || 0;
+      if (aTime !== bTime) {
+        return aTime - bTime;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return sorted.map((feature, index) => ({
+      ...feature,
+      priority: index + 1
+    }));
+  }
+
+  function reorderFeatureList(list: Feature[], sourceId: string, targetId?: string): Feature[] | null {
+    const sourceIndex = list.findIndex(feature => feature.id === sourceId);
+    if (sourceIndex === -1) {
+      return null;
+    }
+
+    const updated = [...list];
+    const [moved] = updated.splice(sourceIndex, 1);
+    let insertIndex =
+      typeof targetId === "string" ? updated.findIndex(feature => feature.id === targetId) : updated.length;
+
+    if (insertIndex < 0) {
+      insertIndex = updated.length;
+    }
+
+    updated.splice(insertIndex, 0, moved);
+
+    const reprioritized = updated.map((feature, index) => ({
+      ...feature,
+      priority: index + 1
+    }));
+
+    const unchanged =
+      reprioritized.length === list.length &&
+      reprioritized.every((feature, index) => feature.id === list[index]?.id);
+
+    return unchanged ? null : reprioritized;
+  }
+
+  async function persistFeatureOrder(updatedOrder: Feature[]) {
+    try {
+      setIsSavingFeatureOrder(true);
+      const response = await apiRequest<ApiResponse<Feature[]>>("/api/features/order", {
+        method: "PUT",
+        body: JSON.stringify({ ids: updatedOrder.map(feature => feature.id) })
+      });
+      setFeatures(normalizeFeatureList(response.data ?? []));
+      setError(null);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to reorder features");
+      void loadFeatures();
+    } finally {
+      setIsSavingFeatureOrder(false);
+    }
+  }
+
+  async function handleFeatureReorder(sourceId: string, targetId?: string) {
+    if (isSavingFeatureOrder) {
+      return;
+    }
+    const updated = reorderFeatureList(features, sourceId, targetId);
+    if (!updated) {
+      setDraggingFeatureId(null);
+      return;
+    }
+    setFeatures(updated);
+    setDraggingFeatureId(null);
+    await persistFeatureOrder(updated);
+  }
+
+  function handleFeatureDragStart(event: DragEvent<HTMLDivElement>, id: string) {
+    event.dataTransfer.setData("text/plain", id);
+    event.dataTransfer.effectAllowed = "move";
+    setDraggingFeatureId(id);
+  }
+
+  function handleFeatureDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function handleFeatureDropOnItem(event: DragEvent<HTMLDivElement>, targetId: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    const sourceId = event.dataTransfer.getData("text/plain");
+    if (!sourceId) return;
+    void handleFeatureReorder(sourceId, targetId);
+  }
+
+  function handleFeatureDropOnList(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const sourceId = event.dataTransfer.getData("text/plain");
+    if (!sourceId) return;
+    void handleFeatureReorder(sourceId);
+  }
+
+  function handleFeatureDragEnd() {
+    setDraggingFeatureId(null);
   }
 
   const backlogByStatus = useMemo(() => {
@@ -244,6 +394,61 @@ export default function BacklogBoard() {
           <button onClick={() => void handleSaveHandoff()} disabled={isSavingHandoff}>
             {isSavingHandoff ? "Saving…" : "Save Handoff"}
           </button>
+        </div>
+      </section>
+
+      <section className="features">
+        <div className="features__header">
+          <div>
+            <h3>Feature Priority</h3>
+            <p>Drag to rank features by delivery order (1 is highest).</p>
+          </div>
+          <div className="features__actions">
+            {isSavingFeatureOrder && <span className="features__status">Saving…</span>}
+            <button
+              className="refresh-button"
+              onClick={() => void loadFeatures()}
+              disabled={loadingFeatures || isSavingFeatureOrder}
+            >
+              {loadingFeatures ? "Loading…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+        <div
+          className={`features__list${isSavingFeatureOrder ? " features__list--saving" : ""}`}
+          onDragOver={handleFeatureDragOver}
+          onDrop={handleFeatureDropOnList}
+        >
+          {loadingFeatures && features.length === 0 ? (
+            <div className="features__empty">Loading…</div>
+          ) : features.length === 0 ? (
+            <div className="features__empty">No features defined yet.</div>
+          ) : (
+            features.map(feature => (
+              <div
+                key={feature.id}
+                className={`feature-card${draggingFeatureId === feature.id ? " feature-card--dragging" : ""}`}
+                draggable={!isSavingFeatureOrder}
+                onDragStart={event => handleFeatureDragStart(event, feature.id)}
+                onDragOver={handleFeatureDragOver}
+                onDrop={event => handleFeatureDropOnItem(event, feature.id)}
+                onDragEnd={handleFeatureDragEnd}
+              >
+                <span className="feature-card__rank">{feature.priority}</span>
+                <div className="feature-card__content">
+                  <div className="feature-card__title">{feature.name}</div>
+                  <div className="feature-card__meta">
+                    {feature.status && <span className="feature-card__meta-item">{feature.status}</span>}
+                    {feature.owner && <span className="feature-card__meta-item">Owner: {feature.owner}</span>}
+                    {feature.tags.length > 0 && (
+                      <span className="feature-card__meta-item">{feature.tags.join(", ")}</span>
+                    )}
+                  </div>
+                  {feature.description && <p className="feature-card__description">{feature.description}</p>}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </section>
 
