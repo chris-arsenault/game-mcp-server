@@ -47,6 +47,7 @@ type BacklogItem = {
   description: string;
   status: string;
   priority: string;
+  feature_id: string | null;
   next_steps: string[];
   completed_work: string[];
   tags: string[];
@@ -332,7 +333,8 @@ app.post("/api/backlog", async (req, res) => {
       title,
       description,
       status = "todo",
-      priority = "P2"
+      priority = "P2",
+      feature_id: rawFeatureId
     } = req.body as Partial<BacklogItem>;
 
     if (!title || !description) {
@@ -343,11 +345,15 @@ app.post("/api/backlog", async (req, res) => {
 
     const now = new Date().toISOString();
     const id = randomUUID();
+    const feature_id =
+      typeof rawFeatureId === "string" && rawFeatureId.trim().length > 0 ? rawFeatureId.trim() : null;
+
     const payload = {
       title,
       description,
       status,
       priority,
+      feature_id,
       next_steps: [],
       completed_work: [],
       tags: [],
@@ -405,6 +411,10 @@ app.put("/api/backlog/:id", async (req, res) => {
       ...cleanUpdates(updates),
       updated_at: now
     };
+    merged.feature_id =
+      typeof merged.feature_id === "string" && merged.feature_id.trim().length > 0
+        ? merged.feature_id.trim()
+        : null;
 
     const shouldReembed =
       updates.description !== undefined || updates.title !== undefined;
@@ -718,6 +728,10 @@ function mapPoint(point: any): BacklogItem | undefined {
     description: payload.description ?? "",
     status: payload.status ?? "todo",
     priority: payload.priority ?? "P2",
+    feature_id:
+      typeof payload.feature_id === "string" && payload.feature_id.trim().length > 0
+        ? payload.feature_id.trim()
+        : null,
     next_steps: payload.next_steps ?? [],
     completed_work: payload.completed_work ?? [],
     tags: payload.tags ?? [],
@@ -873,12 +887,31 @@ function normalizeId(value: unknown): string | undefined {
   return undefined;
 }
 
-async function embedBacklog(item: Pick<BacklogItem, "title" | "description" | "status" | "priority" | "next_steps" | "completed_work" | "acceptance_criteria" | "dependencies" | "notes" | "tags" | "owner" | "category" | "sprint">) {
+async function embedBacklog(
+  item: Pick<
+    BacklogItem,
+    | "title"
+    | "description"
+    | "status"
+    | "priority"
+    | "feature_id"
+    | "next_steps"
+    | "completed_work"
+    | "acceptance_criteria"
+    | "dependencies"
+    | "notes"
+    | "tags"
+    | "owner"
+    | "category"
+    | "sprint"
+  >
+) {
   const text = [
     item.title,
     item.description,
     `Status: ${item.status}`,
     `Priority: ${item.priority}`,
+    `Feature: ${item.feature_id ?? "unassigned"}`,
     item.next_steps.join("\n"),
     item.completed_work.join("\n"),
     item.acceptance_criteria.join("\n"),

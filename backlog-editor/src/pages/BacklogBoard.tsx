@@ -9,6 +9,7 @@ type BacklogItem = {
   description: string;
   status: string;
   priority: string;
+  feature_id: string | null;
   next_steps: string[];
   completed_work: string[];
   tags: string[];
@@ -80,7 +81,8 @@ export default function BacklogBoard() {
     title: "",
     description: "",
     priority: "P2",
-    status: "todo"
+    status: "todo",
+    feature_id: ""
   });
 
   useEffect(() => {
@@ -158,7 +160,8 @@ export default function BacklogBoard() {
         title: newItem.title.trim(),
         description: newItem.description.trim(),
         priority: newItem.priority,
-        status: newItem.status
+        status: newItem.status,
+        feature_id: newItem.feature_id ? newItem.feature_id : null
       };
       const response = await apiRequest<ApiResponse<BacklogItem>>("/api/backlog", {
         method: "POST",
@@ -169,7 +172,8 @@ export default function BacklogBoard() {
         title: "",
         description: "",
         priority: "P2",
-        status: "todo"
+        status: "todo",
+        feature_id: ""
       });
     } catch (err) {
       console.error(err);
@@ -207,7 +211,8 @@ export default function BacklogBoard() {
 
   const renderedHandoff = useMemo(() => {
     const source = handoffDraft ?? "";
-    const html = marked.parse(source);
+    const parsed = marked.parse(source, { async: false });
+    const html = typeof parsed === "string" ? parsed : "";
     if (typeof window === "undefined") {
       return html;
     }
@@ -333,6 +338,25 @@ export default function BacklogBoard() {
   function handleFeatureDragEnd() {
     setDraggingFeatureId(null);
   }
+
+  const featureLookup = useMemo(() => {
+    const map = new Map<string, Feature>();
+    for (const feature of features) {
+      map.set(feature.id, feature);
+    }
+    return map;
+  }, [features]);
+
+  const featureOptions = useMemo(
+    () => [
+      { value: "", label: "Unassigned" },
+      ...features.map(feature => ({
+        value: feature.id,
+        label: feature.name
+      }))
+    ],
+    [features]
+  );
 
   const backlogByStatus = useMemo(() => {
     const grouped: Record<string, BacklogItem[]> = {};
@@ -562,6 +586,24 @@ export default function BacklogBoard() {
                 ))}
               </select>
             </label>
+            <label>
+              Feature
+              <select
+                value={newItem.feature_id}
+                onChange={event => setNewItem({ ...newItem, feature_id: event.target.value })}
+                disabled={loadingFeatures && features.length === 0}
+              >
+                {featureOptions.map(option => (
+                  <option key={option.value || "unassigned"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+                {newItem.feature_id &&
+                  !featureLookup.has(newItem.feature_id) && (
+                    <option value={newItem.feature_id}>{`(Unknown) ${newItem.feature_id}`}</option>
+                  )}
+              </select>
+            </label>
             <button onClick={() => void handleCreateItem()}>Add Item</button>
           </div>
         </div>
@@ -634,6 +676,31 @@ export default function BacklogBoard() {
                               {option}
                             </option>
                           ))}
+                        </select>
+                      </label>
+                      <label>
+                        Feature
+                        <select
+                          value={item.feature_id ?? ""}
+                          onChange={event => {
+                            const nextFeatureId = event.target.value ? event.target.value : null;
+                            if ((item.feature_id ?? null) === nextFeatureId) {
+                              return;
+                            }
+                            void handleUpdateItem(item.id, {
+                              feature_id: nextFeatureId
+                            });
+                          }}
+                          disabled={loadingFeatures && features.length === 0}
+                        >
+                          {featureOptions.map(option => (
+                            <option key={option.value || "unassigned"} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                          {item.feature_id && !featureLookup.has(item.feature_id) && (
+                            <option value={item.feature_id}>{`(Unknown) ${item.feature_id}`}</option>
+                          )}
                         </select>
                       </label>
                     </div>
