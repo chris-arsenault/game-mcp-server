@@ -676,8 +676,10 @@ export default function BacklogBoard() {
                               {option}
                             </option>
                           ))}
-                        </select>
+                            </select>
                       </label>
+                    </div>
+                    <div className="card__controls card__controls--feature">
                       <label>
                         Feature
                         <select

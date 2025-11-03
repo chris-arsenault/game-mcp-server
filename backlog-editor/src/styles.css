@@ -665,6 +665,20 @@ body {
   color: inherit;
 }
 
+.card__controls--feature {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+.card__controls--feature label {
+  width: 100%;
+}
+
+.card__controls--feature select {
+  width: 100%;
+}
+
 .card__footer {
   font-size: 0.75rem;
   color: #9ca3af;
