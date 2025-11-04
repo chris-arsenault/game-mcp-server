@@ -83,6 +83,7 @@ export class GameDevMCPServer {
         "get_pattern_by_name",
         "query_architecture",
         "get_architecture_history",
+        "get_architecture_decision",
         "validate_against_patterns",
         "check_consistency",
         "search_narrative_elements",
@@ -244,6 +245,9 @@ export class GameDevMCPServer {
         );
         this.tools.set("get_architecture_history", async (args, context) =>
             architectureTool.getHistory(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_architecture_decision", async (args, context) =>
+            architectureTool.getDecision(resolveProject(context), (args ?? {}) as any)
         );
 
         // Register validation tools

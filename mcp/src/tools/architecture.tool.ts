@@ -164,6 +164,23 @@ export class ArchitectureTool {
         };
     }
 
+    async getDecision(projectId: string, args: { id: string }) {
+        const normalizedProject = this.projects.requireProject(projectId);
+        const record = await this.fetchDecision(normalizedProject, args.id);
+
+        if (!record) {
+            return {
+                found: false,
+                message: `Architecture decision '${args.id}' not found`,
+            };
+        }
+
+        return {
+            found: true,
+            decision: record,
+        };
+    }
+
     private async embedWithCache(text: string) {
         const key = `embedding:${text}`;
         const cached = this.cache.get<number[]>(key);
@@ -202,6 +219,16 @@ export class ArchitectureTool {
             status: record.status,
             priority: null,
         };
+    }
+
+    private async fetchDecision(projectId: string, id: string): Promise<ArchitectureDecisionRecord | null> {
+        const response = await this.qdrant.retrieve(this.getCollection(projectId), [id]);
+        const point = response?.[0];
+        if (!point) {
+            return null;
+        }
+
+        return this.mapPoint(point);
     }
 
     private buildFilter(scope?: string, tags?: string[] | undefined) {
