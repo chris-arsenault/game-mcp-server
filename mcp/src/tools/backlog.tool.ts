@@ -69,6 +69,13 @@ type BacklogRecord = {
     score?: number;
 };
 
+type BacklogSummary = {
+    id: string;
+    title: string;
+    status: string;
+    priority: string;
+};
+
 export class BacklogTool {
     private collection = "backlog_items";
 
@@ -177,7 +184,7 @@ export class BacklogTool {
         );
 
         const points = response.points ?? [];
-        const items = points.map((point: any) => this.mapPoint(point));
+        const items = points.map((point: any) => this.mapSummaryFromPoint(point));
 
         return {
             count: items.length,
@@ -207,9 +214,11 @@ export class BacklogTool {
             min_score
         );
 
+        const items = results.map((point) => this.mapSummaryFromPoint(point));
+
         return {
-            count: results.length,
-            items: results.map(point => this.mapPoint(point))
+            count: items.length,
+            items
         };
     }
 
@@ -236,14 +245,31 @@ export class BacklogTool {
 
         const points = (response.points ?? []) as any[];
 
-        const sorted = points
+        const sortedRecords = points
             .map((point) => this.mapPoint(point))
-            .sort((a, b) => this.priorityRank(a.priority) - this.priorityRank(b.priority))
-            .slice(0, normalizedLimit);
+            .sort((a, b) => this.priorityRank(a.priority) - this.priorityRank(b.priority));
+
+        const topRecords = sortedRecords.slice(0, normalizedLimit);
 
         return {
-            count: sorted.length,
-            items: sorted
+            count: topRecords.length,
+            items: topRecords.map((record) => this.mapSummaryFromRecord(record))
+        };
+    }
+
+    async getBacklogItem(projectId: string, args: { id: string }) {
+        const normalizedProject = this.projects.requireProject(projectId);
+        const record = await this.fetchById(normalizedProject, args.id);
+        if (!record) {
+            return {
+                found: false,
+                message: `Backlog item '${args.id}' not found`
+            };
+        }
+
+        return {
+            found: true,
+            item: record
         };
     }
 
@@ -264,7 +290,7 @@ export class BacklogTool {
 
         const response: any = await this.qdrant.scroll(this.getCollection(projectId), filter, limit);
         const points = response.points ?? [];
-        return points.map((point: any) => this.mapPoint(point));
+        return points.map((point: any) => this.mapSummaryFromPoint(point));
     }
 
     private priorityRank(priority: string): number {
@@ -378,6 +404,26 @@ export class BacklogTool {
             created_at: payload.created_at ?? "",
             updated_at: payload.updated_at ?? "",
             score: point.score
+        };
+    }
+
+    private mapSummaryFromPoint(point: any): BacklogSummary {
+        const payload = point.payload ?? {};
+        const id = typeof point.id === "string" ? point.id : String(point.id);
+        return {
+            id,
+            title: payload.title ?? "",
+            status: payload.status ?? "",
+            priority: payload.priority ?? ""
+        };
+    }
+
+    private mapSummaryFromRecord(record: BacklogRecord): BacklogSummary {
+        return {
+            id: record.id,
+            title: record.title,
+            status: record.status,
+            priority: record.priority
         };
     }
 

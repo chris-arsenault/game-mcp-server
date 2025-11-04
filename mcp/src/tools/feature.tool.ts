@@ -43,6 +43,13 @@ interface FeatureRecord {
     score?: number;
 }
 
+interface FeatureSummary {
+    id: string;
+    name: string;
+    status: string | null;
+    priority: number;
+}
+
 export class FeatureTool {
     private collection = "features";
 
@@ -187,16 +194,18 @@ export class FeatureTool {
                 })
                 .filter((feature): feature is FeatureRecord => Boolean(feature));
             const ordered = this.sortFeaturesByPriority(mapped).slice(0, limit);
+            const summaries = ordered.map((feature) => this.mapFeatureSummary(feature));
             return {
                 count: ordered.length,
-                features: ordered
+                features: summaries
             };
         }
 
         const ordered = filteredFeatures.slice(0, limit);
+        const summaries = ordered.map((feature) => this.mapFeatureSummary(feature));
         return {
-            count: ordered.length,
-            features: ordered
+            count: summaries.length,
+            features: summaries
         };
     }
 
@@ -336,6 +345,15 @@ export class FeatureTool {
             updated_at: updated,
             priority: this.normalizePriority(payload.priority),
             score
+        };
+    }
+
+    private mapFeatureSummary(feature: FeatureRecord): FeatureSummary {
+        return {
+            id: feature.id,
+            name: feature.name,
+            status: feature.status,
+            priority: feature.priority
         };
     }
 

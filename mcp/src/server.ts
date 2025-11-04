@@ -106,6 +106,7 @@ export class GameDevMCPServer {
         "search_backlog_by_tag",
         "search_backlog_semantic",
         "get_top_backlog_items",
+        "get_backlog_item",
         "list_features",
         "get_feature",
         "list_feature_backlog_items"
@@ -342,6 +343,9 @@ export class GameDevMCPServer {
         );
         this.tools.set("get_top_backlog_items", async (args, context) =>
             backlogTool.getTopBacklogItems(resolveProject(context), (args ?? {}) as any)
+        );
+        this.tools.set("get_backlog_item", async (args, context) =>
+            backlogTool.getBacklogItem(resolveProject(context), (args ?? {}) as any)
         );
 
         this.tools.set("create_feature", async (args, context) =>

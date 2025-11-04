@@ -23,6 +23,13 @@ type HistoryArgs = {
     tag?: string;
 };
 
+type ArchitectureDecisionSummary = {
+    id: string;
+    decision: string;
+    status?: string;
+    priority: string | null;
+};
+
 export class ArchitectureTool {
     private collection = "architectural_patterns";
 
@@ -109,7 +116,9 @@ export class ArchitectureTool {
 
         return {
             count: results.length,
-            decisions: results.map(point => this.mapPoint(point)),
+            decisions: results
+                .map((point) => this.mapPoint(point))
+                .map((record) => this.mapSummary(record)),
         };
     }
 
@@ -118,7 +127,7 @@ export class ArchitectureTool {
         const filter = this.buildFilter(scope, tag ? [tag] : undefined);
 
         const cacheKey = `architecture:${projectId}:history:${limit}:${scope ?? ""}:${tag ?? ""}`;
-        const cached = this.cache.get<ArchitectureDecisionRecord[]>(cacheKey);
+        const cached = this.cache.get<ArchitectureDecisionSummary[]>(cacheKey);
         if (cached) {
             return {
                 count: cached.length,
@@ -144,11 +153,13 @@ export class ArchitectureTool {
                 ) => (b.created_at ?? "").localeCompare(a.created_at ?? "")
             );
 
-        this.cache.set(cacheKey, decisions, 2 * 60 * 1000); // short cache for history
+        const summaries = decisions.map((decision: ArchitectureDecisionRecord) => this.mapSummary(decision));
+
+        this.cache.set(cacheKey, summaries, 2 * 60 * 1000); // short cache for history
 
         return {
-            count: decisions.length,
-            decisions,
+            count: summaries.length,
+            decisions: summaries,
             cached: false,
         };
     }
@@ -181,6 +192,15 @@ export class ArchitectureTool {
             author: payload.author,
             notes: payload.notes,
             score: point.score,
+        };
+    }
+
+    private mapSummary(record: ArchitectureDecisionRecord): ArchitectureDecisionSummary {
+        return {
+            id: record.id,
+            decision: record.decision,
+            status: record.status,
+            priority: null,
         };
     }
 
