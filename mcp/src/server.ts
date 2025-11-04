@@ -925,6 +925,18 @@ export class GameDevMCPServer {
                     }
                 },
                 {
+                    name: "get_backlog_item",
+                    description: "Retrieve a single backlog item by ID with full metadata.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            id: { type: "string", description: "Backlog item identifier." }
+                        },
+                        required: ["id"],
+                        additionalProperties: false
+                    }
+                },
+                {
                     name: "create_feature",
                     description: "Create a new feature definition that groups multiple backlog items.",
                     inputSchema: {

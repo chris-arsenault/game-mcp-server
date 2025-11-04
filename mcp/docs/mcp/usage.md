@@ -33,6 +33,7 @@ This Model Context Protocol (MCP) server centralizes game development knowledge 
 | `list_test_strategies_by_focus` | List QA strategies associated with a particular area (combat, UI, etc.). |
 | `match_bug_fix` | Match logs/code snippets to known bug fixes via embeddings + exact error strings. |
 | `query_architecture` | Semantic query across architectural decision records. |
+| `get_architecture_decision` | Retrieve a single architecture decision by ID with full rationale and metadata. |
 | `query_playtest_feedback` | Vector search qualitative playtest feedback with optional severity/tags filters. |
 | `query_research` | Retrieve research findings semantically similar to the given query. |
 | `query_test_strategies` | Semantic search across stored QA strategies. |
@@ -43,6 +44,7 @@ This Model Context Protocol (MCP) server centralizes game development knowledge 
 | `search_backlog_by_tag` | Filter backlog items by tags/status/priority/owner without semantic matching. |
 | `search_backlog_semantic` | Semantic search across backlog items with optional structured filters. |
 | `get_top_backlog_items` | Fetch the highest-priority unfinished backlog items (defaults to top five). |
+| `get_backlog_item` | Retrieve a single backlog item by ID with the full metadata payload. |
 | `search_graph_semantic` | Perform Qdrant vector search against knowledge-graph embeddings (`code_graph`). |
 | `search_lore` | Semantic search across lore entries, optionally filtering by category/region/tags. |
 | `search_narrative_elements` | Semantic search over narrative beats, acts, and character elements. |
